@@ -1163,7 +1163,6 @@ function renderDashboard(){
 }
 
 function drawBarChart(labels, values, byEnc){
-  // Ignoramos labels/values/byEnc — dibujamos una barra por estado global
   const canvas=document.getElementById('barChart'); if(!canvas) return;
   const records=window._records||[];
   const enc=records.filter(r=>r.estado==='en-curso').length;
@@ -1171,14 +1170,14 @@ function drawBarChart(labels, values, byEnc){
   const can=records.filter(r=>r.estado==='cancelado').length;
 
   const ESTADOS=[
-    {label:'En Curso',  value:enc, color:'#2563EB', light:'#DBEAFE', emoji:'🔵'},
-    {label:'Entregado', value:ent, color:'#059669', light:'#D1FAE5', emoji:'🟢'},
-    {label:'Cancelado', value:can, color:'#DC2626', light:'#FEE2E2', emoji:'🔴'},
+    {label:'En Curso',  value:enc, color:'#2563EB'},
+    {label:'Entregado', value:ent, color:'#059669'},
+    {label:'Cancelado', value:can, color:'#DC2626'},
   ];
 
   const dpr=window.devicePixelRatio||1;
   const W=canvas.parentElement.clientWidth-8;
-  const H=220;
+  const H=280;
   canvas.width=W*dpr; canvas.height=H*dpr;
   canvas.style.width=W+'px'; canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr);
@@ -1189,83 +1188,83 @@ function drawBarChart(labels, values, byEnc){
     ctx.fillStyle='#94A3B8';
     ctx.font='13px IBM Plex Sans,sans-serif';
     ctx.textAlign='center';
-    ctx.fillText('Sin datos aún — agrega estudios para ver la gráfica',W/2,H/2);
+    ctx.fillText('Sin datos aún',W/2,H/2);
     return;
   }
 
-  const PAD_LEFT=24, PAD_RIGHT=24, PAD_TOP=24, PAD_BOT=56;
+  // Márgenes generosos para que nada quede recortado
+  const PAD_LEFT=30, PAD_RIGHT=30, PAD_TOP=60, PAD_BOT=50;
   const chartW=W-PAD_LEFT-PAD_RIGHT;
   const chartH=H-PAD_TOP-PAD_BOT;
   const maxVal=Math.max(enc,ent,can,1);
-  const barW=Math.min(chartW/3*0.55, 90);
+  const barW=Math.min(chartW/3*0.50, 80);
   const groupW=chartW/3;
 
-  // Líneas de cuadrícula horizontales
-  const steps=maxVal<=5?maxVal:5;
+  // Líneas de cuadrícula
+  const steps=Math.min(maxVal,5);
   for(let i=0;i<=steps;i++){
     const v=Math.round(maxVal*i/steps);
     const y=PAD_TOP+chartH-(chartH*i/steps);
-    ctx.beginPath(); ctx.strokeStyle=i===0?'#CBD5E1':'#E2E8F0';
+    ctx.beginPath();
+    ctx.strokeStyle=i===0?'#CBD5E1':'#E2E8F0';
     ctx.lineWidth=i===0?1.5:1;
-    ctx.setLineDash(i===0?[]:[4,4]);
+    ctx.setLineDash(i===0?[]:[3,3]);
     ctx.moveTo(PAD_LEFT,y); ctx.lineTo(W-PAD_RIGHT,y); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle='#94A3B8'; ctx.font='10px IBM Plex Mono,monospace';
+    ctx.fillStyle='#94A3B8';
+    ctx.font='10px IBM Plex Mono,monospace';
     ctx.textAlign='right';
     ctx.fillText(v, PAD_LEFT-4, y+4);
   }
 
-  // Dibujar cada barra
+  // Barras
   ESTADOS.forEach((est,i)=>{
     const x=PAD_LEFT + groupW*i + (groupW-barW)/2;
-    const barH=est.value===0?2:Math.max((est.value/maxVal)*chartH, 4);
+    const barH=est.value===0?3:Math.max((est.value/maxVal)*chartH, 6);
     const y=PAD_TOP+chartH-barH;
 
-    // Sombra suave
-    ctx.shadowColor='rgba(0,0,0,0.10)';
-    ctx.shadowBlur=8;
-    ctx.shadowOffsetY=3;
-
-    // Barra principal con esquinas redondeadas arriba
+    // Barra con esquinas redondeadas arriba
     ctx.fillStyle=est.color;
+    ctx.shadowColor='rgba(0,0,0,0.12)';
+    ctx.shadowBlur=6; ctx.shadowOffsetY=3;
     ctx.beginPath();
-    ctx.moveTo(x+6, y);
-    ctx.lineTo(x+barW-6, y);
-    ctx.quadraticCurveTo(x+barW, y, x+barW, y+6);
-    ctx.lineTo(x+barW, y+barH);
-    ctx.lineTo(x, y+barH);
-    ctx.lineTo(x, y+6);
-    ctx.quadraticCurveTo(x, y, x+6, y);
+    const r=6;
+    ctx.moveTo(x+r,y);
+    ctx.lineTo(x+barW-r,y);
+    ctx.quadraticCurveTo(x+barW,y,x+barW,y+r);
+    ctx.lineTo(x+barW,y+barH);
+    ctx.lineTo(x,y+barH);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
     ctx.closePath();
     ctx.fill();
-
     ctx.shadowColor='transparent'; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
 
-    // Número encima de la barra
-    ctx.fillStyle='#0F1F3D';
-    ctx.font='bold 22px IBM Plex Mono,monospace';
-    ctx.textAlign='center';
-    ctx.fillText(est.value, x+barW/2, y-10);
-
-    // Porcentaje debajo del número
+    // Porcentaje — encima de la barra con espacio suficiente
     const pct=Math.round(est.value/total*100);
     ctx.fillStyle=est.color;
     ctx.font='bold 11px IBM Plex Sans,sans-serif';
+    ctx.textAlign='center';
     ctx.fillText(pct+'%', x+barW/2, y-28);
+
+    // Número grande — entre el porcentaje y la barra
+    ctx.fillStyle='#0F1F3D';
+    ctx.font='bold 20px IBM Plex Mono,monospace';
+    ctx.fillText(est.value, x+barW/2, y-10);
 
     // Etiqueta de estado debajo de la barra
     ctx.fillStyle='#374151';
     ctx.font='bold 12px IBM Plex Sans,sans-serif';
     ctx.fillText(est.label, x+barW/2, PAD_TOP+chartH+18);
 
-    // Línea de color debajo de la etiqueta
+    // Línea de color decorativa
     ctx.fillStyle=est.color;
-    ctx.fillRect(x+barW/2-18, PAD_TOP+chartH+24, 36, 3);
+    ctx.fillRect(x+barW/2-20, PAD_TOP+chartH+22, 40, 3);
   });
 
   // Título eje Y
   ctx.save();
-  ctx.translate(10, PAD_TOP+chartH/2);
+  ctx.translate(12, PAD_TOP+chartH/2);
   ctx.rotate(-Math.PI/2);
   ctx.fillStyle='#94A3B8';
   ctx.font='10px IBM Plex Sans,sans-serif';
