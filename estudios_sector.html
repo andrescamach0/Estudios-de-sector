@@ -631,16 +631,17 @@ const BUILTIN_USERS=[
 ];
 
 function loadUsers(){
-  const extra=JSON.parse(localStorage.getItem('sec_extra_users')||'[]');
-  const builtinFiltered=BUILTIN_USERS.filter(b=>!extra.find(e=>e.id===b.id));
-  return [...builtinFiltered,...extra];
+  // Limpia cualquier usuario extra guardado previamente — solo BUILTIN_USERS
+  localStorage.removeItem('sec_extra_users');
+  return [...BUILTIN_USERS];
 }
 function saveUsers(users){
-  const extra=users.filter(u=>{
+  // Solo guarda modificaciones a usuarios base (ej. cambio de contraseña)
+  const mods=users.filter(u=>{
     const b=BUILTIN_USERS.find(x=>x.id===u.id);
-    return !b||(b.pwHash!==u.pwHash||b.role!==u.role||b.name!==u.name);
+    return b&&(b.pwHash!==u.pwHash||b.role!==u.role||b.name!==u.name);
   });
-  localStorage.setItem('sec_extra_users',JSON.stringify(extra));
+  if(mods.length) localStorage.setItem('sec_user_mods',JSON.stringify(mods));
 }
 
 /* ═══════════════════════════════════════
