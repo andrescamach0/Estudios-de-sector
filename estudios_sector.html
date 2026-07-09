@@ -591,6 +591,14 @@ onSnapshot(collection(db,'estudios'), snap=>{
   console.error('Firestore error:',err);
 });
 
+// ── Escucha en tiempo real de la colección "usuarios" ─────
+onSnapshot(collection(db,'usuarios'), snap=>{
+  window._fbUsers=[];
+  snap.forEach(d=>window._fbUsers.push({id:d.id,...d.data()}));
+  if(window._appReady && document.getElementById('page-admin')?.classList.contains('active'))
+    window.renderAdminPanel();
+}, err=>{ console.error('Firestore usuarios error:',err); });
+
 // ── CRUD expuesto globalmente ─────────────────────────────
 window._saveRecord = async (data)=>{
   const {id,...rest}=data;
@@ -604,6 +612,13 @@ window._updateStatus = async (id,estado)=>{
 };
 window._saveBitacora = async (id, bitacora)=>{
   await updateDoc(doc(db,'estudios',id),{bitacora});
+};
+window._saveUser = async (user)=>{
+  const {id,...rest}=user;
+  await setDoc(doc(db,'usuarios',id),rest);
+};
+window._deleteUser = async (id)=>{
+  await deleteDoc(doc(db,'usuarios',id));
 };
 
 window._dbReady=true;
@@ -631,9 +646,12 @@ const BUILTIN_USERS=[
 ];
 
 function loadUsers(){
-  // Limpia cualquier usuario extra guardado previamente — solo BUILTIN_USERS
+  // Limpia localStorage viejo
   localStorage.removeItem('sec_extra_users');
-  return [...BUILTIN_USERS];
+  // Combina usuarios base + usuarios guardados en Firebase
+  const fbUsers=window._fbUsers||[];
+  const builtinFiltered=BUILTIN_USERS.filter(b=>!fbUsers.find(f=>f.id===b.id));
+  return [...builtinFiltered,...fbUsers];
 }
 function saveUsers(users){
   // Solo guarda modificaciones a usuarios base (ej. cambio de contraseña)
@@ -680,7 +698,9 @@ async function doLogin(){
   document.getElementById('login-error').style.display='none';
   ['login-user','login-pass'].forEach(id=>document.getElementById(id).classList.remove('input-error'));
   if(!uIn||!pIn){showLoginErr();return;}
-  const users=loadUsers(),hash=await sha256(pIn);
+  // Combina usuarios base + Firebase (si ya cargaron)
+  const users=loadUsers();
+  const hash=await sha256(pIn);
   const user=users.find(u=>u.username===uIn&&u.pwHash===hash);
   if(!user){
     failedAttempts++;
@@ -1083,20 +1103,22 @@ async function saveUser(){
   const users=loadUsers();
   const dup=users.find(u=>u.username===username&&u.id!==editingUserId);
   if(dup){showErr('Ya existe un usuario con ese login.');return;}
-  if(editingUserId){
-    const i=users.findIndex(u=>u.id===editingUserId);
-    users[i].name=name;users[i].username=username;users[i].role=role;
-    if(pass)users[i].pwHash=await sha256(pass);
-    if(editingUserId===currentUser.id){currentUser=users[i];applyUserUI();}
-  } else {
-    users.push({id:'u'+Date.now(),name,username,pwHash:await sha256(pass),role});
-  }
-  saveUsers(users);closeUserModal();renderAdminPanel();
+  const pwHash=pass?await sha256(pass):users.find(u=>u.id===editingUserId)?.pwHash||'';
+  const userData={id:editingUserId||'u'+Date.now(), name, username, pwHash, role};
+  showSyncToast('Guardando usuario ☁️...',3000);
+  await window._saveUser(userData);
+  if(editingUserId===currentUser?.id){currentUser={...currentUser,name,username,role};applyUserUI();}
+  showSyncToast('✅ Usuario guardado en Firebase');
+  closeUserModal();
 }
-function deleteUser(id){
+async function deleteUser(id){
   if(BUILTIN_USERS.find(b=>b.id===id)){alert('No puedes eliminar usuarios base.');return;}
-  if(!confirm('¿Eliminar este usuario?'))return;
-  saveUsers(loadUsers().filter(u=>u.id!==id));renderAdminPanel();
+  if(id===currentUser?.id){alert('No puedes eliminar tu propio usuario.');return;}
+  const u=loadUsers().find(x=>x.id===id);
+  if(!confirm(`¿Eliminar al usuario "${u?.name}"?`)) return;
+  showSyncToast('Eliminando usuario...');
+  await window._deleteUser(id);
+  showSyncToast('✅ Usuario eliminado');
 }
 
 /* ═══════════════════════════════════════
