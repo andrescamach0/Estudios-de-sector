@@ -607,6 +607,8 @@ window._saveBitacora = async (id, bitacora)=>{
 };
 
 window._dbReady=true;
+// Si el usuario ya inició sesión mientras Firebase cargaba, renderizar ahora
+if(window._appReady) window.renderTable();
 if(window._pendingInit) window._pendingInit();
 </script>
 
@@ -624,22 +626,8 @@ async function sha256(msg){
    Funcionan en CUALQUIER navegador sin configuración.
 ═══════════════════════════════════════ */
 const BUILTIN_USERS=[
-  {id:'u1',  name:'Administrador',       username:'admin',               pwHash:'5a55c7873ed7338f35d782adb513d336a36086ddec0fa4b6444fda6d440387c2', role:'admin'},
-  {id:'u2',  name:'Consultor',           username:'viewer',              pwHash:'c62cb69da67320ba15e3e291eb02e271589270bbfd21d32a00653b552beaeb28', role:'viewer'},
-  {id:'u3',  name:'Andres Camacho',      username:'andres.camacho',      pwHash:'834b3d828d46de7fb8ee95c9715f55a149cf00a631fb500666e8c97b303d0d97', role:'admin'},
-  {id:'u4',  name:'Luis Echeverry',      username:'luis.echeverry',      pwHash:'235e3a8e296b343a4b893326859be45ae5c30daa3d419fbe4ada5ed80fffcd53', role:'admin'},
-  {id:'u5',  name:'Johanna Agudelo',     username:'johanna.agudelo',     pwHash:'da5af95c146e1989a9f145e5ebcb6afa7a2600e6d614eede7da6bdf8e8bfb852', role:'viewer'},
-  {id:'u6',  name:'Yuly Leiva',          username:'yuly.leiva',          pwHash:'00e0d4efa950a68d2f608e5b9c7abac4f3a77e0903bb945694a37d81a72c7344', role:'viewer'},
-  {id:'u7',  name:'Oscar Victoria',      username:'oscar.victoria',      pwHash:'55123b67e8e4691b72ecc87035c83997e8d7212d1964d38970b7df9ae971fc5c', role:'viewer'},
-  {id:'u8',  name:'Natalia Jimenez',     username:'natalia.jimenez',     pwHash:'103a4cb6a6659ace735f4cb67dfd82398fe0626855e34b5033cc746d142d8ecf', role:'viewer'},
-  {id:'u9',  name:'Alexandra Portillo',  username:'alexandra.portillo',  pwHash:'b09001c94d731bc7665de678e5391c22dc9e93d4de346b8bc1841aedb8786490', role:'viewer'},
-  {id:'u10', name:'Jessica Gutierrez',   username:'jessica.gutierrez',   pwHash:'cb9b0d42356eefcba011028b509bba8508651f41cfaf59620a6c50bb0b683986', role:'viewer'},
-  {id:'u11', name:'Briam Brito',         username:'briam.brito',         pwHash:'5220da43a1f93f5facc490115300301a4f4d2929574325806d802079287b075e', role:'viewer'},
-  {id:'u12', name:'Juan David Gutierrez',username:'juandavid.gutierrez', pwHash:'57c35fd1c8ef49b550059cf7d074e969de9276c0a027851ae19d8324ed3e8594', role:'viewer'},
-  {id:'u13', name:'Tania Humanez',       username:'tania.humanez',       pwHash:'15383154ab0ba57dd2b89d3f3c36f4bf670fafdc57736cd7354b86a47be42540', role:'viewer'},
-  {id:'u14', name:'Katiana Jimenez',     username:'katiana.jimenez',     pwHash:'588e83e967d64d097a9bf16da93f914e714b7f7f4963b2a4a226c5c975e7785a', role:'viewer'},
-  {id:'u15', name:'Jhoana Medina',       username:'jhoana.medina',       pwHash:'9ae30e6f61cfbd110764abfb1c71b048786e333bd98b85156aafd00c805aa955', role:'viewer'},
-  {id:'u16', name:'Mariana Garcia Morales',username:'mariana.garcia',    pwHash:'13cd27e83c0d5ad67f6c2230d4f505d19c210e92d4317837133971cb3e885918', role:'viewer'},
+  {id:'u3', name:'Andres Camacho', username:'andres.camacho',
+   pwHash:'834b3d828d46de7fb8ee95c9715f55a149cf00a631fb500666e8c97b303d0d97', role:'admin'},
 ];
 
 function loadUsers(){
@@ -679,8 +667,9 @@ function startLockout(){
 let currentUser=null;
 
 function waitForDb(fn){
-  if(window._dbReady) fn();
-  else window._pendingInit=fn;
+  // Login ya no espera Firebase — lanza la app inmediatamente
+  // Firebase se conecta en segundo plano
+  fn();
 }
 
 async function doLogin(){
@@ -724,7 +713,14 @@ function launchApp(){
   resetInactivity();
   ['mousemove','keydown','click'].forEach(e=>document.addEventListener(e,resetInactivity));
   window._appReady=true;
-  renderTable();
+  // Si Firebase aún no está listo, mostrar estado de carga
+  if(!window._dbReady){
+    const tbody=document.getElementById('table-body');
+    if(tbody) tbody.innerHTML=`<tr><td colspan="14"><div class="empty-state"><div class="big-icon">⏳</div><p>Conectando con Firebase... un momento.</p></div></td></tr>`;
+    // Cuando Firebase esté listo, renderizará automáticamente via onSnapshot
+  } else {
+    renderTable();
+  }
 }
 function startSessionTimer(){
   clearInterval(sessionInterval);
@@ -815,6 +811,7 @@ function showPage(id){
 function sortBy(f){if(sortField===f)sortDir=sortDir==='asc'?'desc':'asc';else{sortField=f;sortDir='asc';}renderTable();}
 
 function renderTable(){
+  window.renderTable=renderTable; // asegura exposición global
   const records=window._records||[];
   const q=(document.getElementById('search-input')?.value||'').toLowerCase();
   let data=records.filter(r=>!q||(r.ticket||'').toLowerCase().includes(q)||(r.encargado||'').toLowerCase().includes(q)||(r.abogado||'').toLowerCase().includes(q)||(r.objeto||'').toLowerCase().includes(q)||(r.obs||'').toLowerCase().includes(q));
@@ -1105,6 +1102,7 @@ function deleteUser(id){
    DASHBOARD
 ═══════════════════════════════════════ */
 function renderDashboard(){
+  window.renderDashboard=renderDashboard;
   const records=window._records||[];
   const enc=records.filter(r=>r.estado==='en-curso').length;
   const ent=records.filter(r=>r.estado==='entregado').length;
