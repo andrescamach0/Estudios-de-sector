@@ -397,8 +397,8 @@ textarea#entry-text:focus{border-color:var(--accent);}
         <div class="dash-divider">Análisis Gráfico</div>
         <div class="charts-row">
           <div class="chart-card">
-            <div class="chart-card-header"><div><h3>Procesos por Encargado</h3><p>Distribución de carga por responsable</p></div><span class="chart-card-tag">Barras apiladas</span></div>
-            <div class="chart-card-body"><canvas id="barChart" height="240"></canvas></div>
+            <div class="chart-card-header"><div><h3>Procesos por Encargado y Estado</h3><p>Cantidad de En Curso, Entregado y Cancelado por responsable</p></div><span class="chart-card-tag">Barras horizontales</span></div>
+            <div class="chart-card-body"><canvas id="barChart"></canvas></div>
           </div>
           <div class="chart-card">
             <div class="chart-card-header"><div><h3>Distribución por Estado</h3><p>Proporción según estado actual</p></div><span class="chart-card-tag">Donut</span></div>
@@ -1106,10 +1106,16 @@ async function saveUser(){
   const pwHash=pass?await sha256(pass):users.find(u=>u.id===editingUserId)?.pwHash||'';
   const userData={id:editingUserId||'u'+Date.now(), name, username, pwHash, role};
   showSyncToast('Guardando usuario ☁️...',3000);
-  await window._saveUser(userData);
-  if(editingUserId===currentUser?.id){currentUser={...currentUser,name,username,role};applyUserUI();}
-  showSyncToast('✅ Usuario guardado en Firebase');
-  closeUserModal();
+  try{
+    await window._saveUser(userData);
+    if(editingUserId===currentUser?.id){currentUser={...currentUser,name,username,role};applyUserUI();}
+    showSyncToast('✅ Usuario guardado en Firebase');
+    closeUserModal();
+  } catch(err){
+    showErr('Error al guardar: '+err.message+'. Verifica las reglas de Firestore.');
+    showSyncToast('❌ Error al guardar usuario',3000);
+    console.error('saveUser error:',err);
+  }
 }
 async function deleteUser(id){
   if(BUILTIN_USERS.find(b=>b.id===id)){alert('No puedes eliminar usuarios base.');return;}
@@ -1156,28 +1162,153 @@ function renderDashboard(){
   renderSumTable('dash-abog-body',Object.keys(byAbog).sort(),byAbog);
 }
 
-function drawBarChart(labels,values,byEnc){
-  const canvas=document.getElementById('barChart');if(!canvas)return;
-  const dpr=window.devicePixelRatio||1,W=canvas.parentElement.clientWidth-40,H=240;
-  canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';
-  const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
-  if(!labels.length){ctx.fillStyle='#94A3B8';ctx.font='13px IBM Plex Sans,sans-serif';ctx.textAlign='center';ctx.fillText('Sin datos aún',W/2,H/2);return;}
-  const PL=46,PR=16,PT=16,PB=56,cW=W-PL-PR,cH=H-PT-PB;
-  const mx=Math.max(...values,1);
-  ctx.strokeStyle='#E2E8F0';ctx.lineWidth=1;
-  for(let i=0;i<=5;i++){const y=PT+cH-(cH*i/5);ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(PL+cW,y);ctx.stroke();ctx.fillStyle='#94A3B8';ctx.font='11px IBM Plex Mono,monospace';ctx.textAlign='right';ctx.fillText(Math.round(mx*i/5),PL-6,y+4);}
-  const gW=cW/labels.length,bW=Math.min(gW*.55,52);
-  const sK=['en-curso','entregado','cancelado'],sC=['#2563EB','#059669','#DC2626'];
-  labels.forEach((lbl,i)=>{const d=byEnc[lbl],x=PL+gW*i+(gW-bW)/2;let y=PT+cH;
-    sK.forEach((k,si)=>{const v=d[k]||0;if(!v)return;const bh=(v/mx)*cH;y-=bh;ctx.fillStyle=sC[si];const isTop=sK.slice(si+1).every(k2=>!d[k2]);ctx.beginPath();if(isTop){rRect(ctx,x,y,bW,bh,4);}else{ctx.rect(x,y,bW,bh);}ctx.fill();});
-    ctx.fillStyle='#1E293B';ctx.font='bold 11px IBM Plex Sans,sans-serif';ctx.textAlign='center';
-    ctx.fillText(values[i],x+bW/2,PT+cH-(values[i]/mx)*cH-5);
-    ctx.fillStyle='#475569';ctx.font='11px IBM Plex Sans,sans-serif';
-    ctx.save();ctx.translate(x+bW/2,PT+cH+12);ctx.rotate(-0.4);ctx.fillText(lbl.split(' ')[0],0,0);ctx.restore();
+function drawBarChart(labels, values, byEnc){
+  const canvas=document.getElementById('barChart'); if(!canvas) return;
+  const dpr=window.devicePixelRatio||1;
+
+  // Altura dinámica según número de encargados
+  const ROW_H=64, PAD_TOP=20, PAD_BOT=60, PAD_LEFT=160, PAD_RIGHT=60;
+  const H=PAD_TOP + labels.length*ROW_H + PAD_BOT;
+  const W=canvas.parentElement.clientWidth-8;
+
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,W,H);
+
+  if(!labels.length){
+    ctx.fillStyle='#94A3B8';
+    ctx.font='13px IBM Plex Sans,sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText('Sin datos aún — agrega estudios para ver la gráfica',W/2,H/2);
+    return;
+  }
+
+  const CHART_W=W-PAD_LEFT-PAD_RIGHT;
+  const ESTADOS=[
+    {key:'en-curso',  label:'En Curso',  color:'#2563EB', light:'#DBEAFE'},
+    {key:'entregado', label:'Entregado', color:'#059669', light:'#D1FAE5'},
+    {key:'cancelado', label:'Cancelado', color:'#DC2626', light:'#FEE2E2'},
+  ];
+  const BAR_H=14, BAR_GAP=5;
+  const GROUP_H=ESTADOS.length*(BAR_H+BAR_GAP);
+  const maxVal=Math.max(...labels.map(l=>byEnc[l].total), 1);
+
+  // Líneas de cuadrícula verticales
+  const gridSteps=5;
+  for(let i=0;i<=gridSteps;i++){
+    const x=PAD_LEFT+(CHART_W*i/gridSteps);
+    ctx.beginPath(); ctx.strokeStyle='#E2E8F0'; ctx.lineWidth=1;
+    ctx.moveTo(x,PAD_TOP); ctx.lineTo(x,H-PAD_BOT); ctx.stroke();
+    const val=Math.round(maxVal*i/gridSteps);
+    ctx.fillStyle='#94A3B8'; ctx.font='10px IBM Plex Mono,monospace';
+    ctx.textAlign='center';
+    ctx.fillText(val, x, H-PAD_BOT+14);
+  }
+
+  // Línea de eje vertical izquierdo
+  ctx.beginPath(); ctx.strokeStyle='#CBD5E1'; ctx.lineWidth=1.5;
+  ctx.moveTo(PAD_LEFT, PAD_TOP); ctx.lineTo(PAD_LEFT, H-PAD_BOT); ctx.stroke();
+
+  // Barras por encargado
+  labels.forEach((lbl, ri)=>{
+    const d=byEnc[lbl];
+    const groupY=PAD_TOP + ri*ROW_H + (ROW_H-GROUP_H)/2;
+
+    // Fondo alterno de fila
+    if(ri%2===0){
+      ctx.fillStyle='#F8FAFC';
+      ctx.fillRect(PAD_LEFT, PAD_TOP+ri*ROW_H, CHART_W, ROW_H);
+    }
+
+    // Nombre del encargado
+    ctx.fillStyle='#0F1F3D';
+    ctx.font='bold 11px IBM Plex Sans,sans-serif';
+    ctx.textAlign='right';
+    // Nombre completo, truncado si es muy largo
+    const displayName=lbl.length>20?lbl.slice(0,18)+'…':lbl;
+    ctx.fillText(displayName, PAD_LEFT-10, groupY+GROUP_H/2+4);
+
+    // Total a la derecha
+    ctx.fillStyle='#64748B';
+    ctx.font='bold 11px IBM Plex Mono,monospace';
+    ctx.textAlign='left';
+    ctx.fillText('Total: '+d.total, W-PAD_RIGHT+6, groupY+GROUP_H/2+4);
+
+    // Barras por estado
+    ESTADOS.forEach((est, ei)=>{
+      const v=d[est.key]||0;
+      const barW=v===0?0:Math.max((v/maxVal)*CHART_W, 4);
+      const barY=groupY+ei*(BAR_H+BAR_GAP);
+
+      // Barra de fondo (track)
+      ctx.fillStyle='#F1F5F9';
+      ctx.beginPath();
+      hRoundRect(ctx, PAD_LEFT, barY, CHART_W, BAR_H, 4);
+      ctx.fill();
+
+      // Barra de valor
+      if(v>0){
+        ctx.fillStyle=est.color;
+        ctx.beginPath();
+        hRoundRect(ctx, PAD_LEFT, barY, barW, BAR_H, 4);
+        ctx.fill();
+
+        // Etiqueta de cantidad dentro o fuera de la barra
+        ctx.font='bold 10px IBM Plex Mono,monospace';
+        if(barW>28){
+          ctx.fillStyle='white';
+          ctx.textAlign='left';
+          ctx.fillText(v, PAD_LEFT+6, barY+BAR_H-3);
+        } else {
+          ctx.fillStyle=est.color;
+          ctx.textAlign='left';
+          ctx.fillText(v, PAD_LEFT+barW+4, barY+BAR_H-3);
+        }
+      } else {
+        // Sin datos
+        ctx.fillStyle='#CBD5E1';
+        ctx.font='10px IBM Plex Sans,sans-serif';
+        ctx.textAlign='left';
+        ctx.fillText('0', PAD_LEFT+6, barY+BAR_H-3);
+      }
+    });
   });
-  let lx=PL;[{c:'#2563EB',l:'En Curso'},{c:'#059669',l:'Entregado'},{c:'#DC2626',l:'Cancelado'}].forEach(li=>{ctx.fillStyle=li.c;ctx.beginPath();ctx.arc(lx+5,H-10,4,0,Math.PI*2);ctx.fill();ctx.fillStyle='#64748B';ctx.font='10px IBM Plex Sans,sans-serif';ctx.textAlign='left';ctx.fillText(li.l,lx+13,H-7);lx+=ctx.measureText(li.l).width+28;});
+
+  // Leyenda inferior
+  const legY=H-PAD_BOT+28;
+  let lx=PAD_LEFT;
+  ESTADOS.forEach(est=>{
+    // Cuadrado de color
+    ctx.fillStyle=est.color;
+    ctx.beginPath();
+    ctx.roundRect(lx, legY-10, 12, 12, 3);
+    ctx.fill();
+    ctx.fillStyle='#374151';
+    ctx.font='11px IBM Plex Sans,sans-serif';
+    ctx.textAlign='left';
+    ctx.fillText(est.label, lx+16, legY);
+    lx+=ctx.measureText(est.label).width+40;
+  });
+
+  // Título del eje X
+  ctx.fillStyle='#94A3B8';
+  ctx.font='10px IBM Plex Sans,sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('Cantidad de procesos', PAD_LEFT+CHART_W/2, H-8);
 }
-function rRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h);ctx.lineTo(x,y+h);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+
+function hRoundRect(ctx,x,y,w,h,r){
+  if(w<r*2) r=w/2;
+  if(h<r*2) r=h/2;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
 
 function drawPieChart(values){
   const canvas=document.getElementById('pieChart');if(!canvas)return;
