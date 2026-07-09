@@ -397,7 +397,7 @@ textarea#entry-text:focus{border-color:var(--accent);}
         <div class="dash-divider">Análisis Gráfico</div>
         <div class="charts-row">
           <div class="chart-card">
-            <div class="chart-card-header"><div><h3>Procesos por Encargado y Estado</h3><p>Cantidad de En Curso, Entregado y Cancelado por responsable</p></div><span class="chart-card-tag">Barras horizontales</span></div>
+            <div class="chart-card-header"><div><h3>Procesos por Estado</h3><p>Total de procesos En Curso, Entregado y Cancelado</p></div><span class="chart-card-tag">Barras</span></div>
             <div class="chart-card-body"><canvas id="barChart"></canvas></div>
           </div>
           <div class="chart-card">
@@ -1163,20 +1163,29 @@ function renderDashboard(){
 }
 
 function drawBarChart(labels, values, byEnc){
+  // Ignoramos labels/values/byEnc — dibujamos una barra por estado global
   const canvas=document.getElementById('barChart'); if(!canvas) return;
+  const records=window._records||[];
+  const enc=records.filter(r=>r.estado==='en-curso').length;
+  const ent=records.filter(r=>r.estado==='entregado').length;
+  const can=records.filter(r=>r.estado==='cancelado').length;
+
+  const ESTADOS=[
+    {label:'En Curso',  value:enc, color:'#2563EB', light:'#DBEAFE', emoji:'🔵'},
+    {label:'Entregado', value:ent, color:'#059669', light:'#D1FAE5', emoji:'🟢'},
+    {label:'Cancelado', value:can, color:'#DC2626', light:'#FEE2E2', emoji:'🔴'},
+  ];
+
   const dpr=window.devicePixelRatio||1;
-
-  // Altura dinámica según número de encargados
-  const ROW_H=64, PAD_TOP=20, PAD_BOT=60, PAD_LEFT=160, PAD_RIGHT=60;
-  const H=PAD_TOP + labels.length*ROW_H + PAD_BOT;
   const W=canvas.parentElement.clientWidth-8;
-
+  const H=220;
   canvas.width=W*dpr; canvas.height=H*dpr;
   canvas.style.width=W+'px'; canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,W,H);
 
-  if(!labels.length){
+  const total=enc+ent+can;
+  if(total===0){
     ctx.fillStyle='#94A3B8';
     ctx.font='13px IBM Plex Sans,sans-serif';
     ctx.textAlign='center';
@@ -1184,130 +1193,85 @@ function drawBarChart(labels, values, byEnc){
     return;
   }
 
-  const CHART_W=W-PAD_LEFT-PAD_RIGHT;
-  const ESTADOS=[
-    {key:'en-curso',  label:'En Curso',  color:'#2563EB', light:'#DBEAFE'},
-    {key:'entregado', label:'Entregado', color:'#059669', light:'#D1FAE5'},
-    {key:'cancelado', label:'Cancelado', color:'#DC2626', light:'#FEE2E2'},
-  ];
-  const BAR_H=14, BAR_GAP=5;
-  const GROUP_H=ESTADOS.length*(BAR_H+BAR_GAP);
-  const maxVal=Math.max(...labels.map(l=>byEnc[l].total), 1);
+  const PAD_LEFT=24, PAD_RIGHT=24, PAD_TOP=24, PAD_BOT=56;
+  const chartW=W-PAD_LEFT-PAD_RIGHT;
+  const chartH=H-PAD_TOP-PAD_BOT;
+  const maxVal=Math.max(enc,ent,can,1);
+  const barW=Math.min(chartW/3*0.55, 90);
+  const groupW=chartW/3;
 
-  // Líneas de cuadrícula verticales
-  const gridSteps=5;
-  for(let i=0;i<=gridSteps;i++){
-    const x=PAD_LEFT+(CHART_W*i/gridSteps);
-    ctx.beginPath(); ctx.strokeStyle='#E2E8F0'; ctx.lineWidth=1;
-    ctx.moveTo(x,PAD_TOP); ctx.lineTo(x,H-PAD_BOT); ctx.stroke();
-    const val=Math.round(maxVal*i/gridSteps);
+  // Líneas de cuadrícula horizontales
+  const steps=maxVal<=5?maxVal:5;
+  for(let i=0;i<=steps;i++){
+    const v=Math.round(maxVal*i/steps);
+    const y=PAD_TOP+chartH-(chartH*i/steps);
+    ctx.beginPath(); ctx.strokeStyle=i===0?'#CBD5E1':'#E2E8F0';
+    ctx.lineWidth=i===0?1.5:1;
+    ctx.setLineDash(i===0?[]:[4,4]);
+    ctx.moveTo(PAD_LEFT,y); ctx.lineTo(W-PAD_RIGHT,y); ctx.stroke();
+    ctx.setLineDash([]);
     ctx.fillStyle='#94A3B8'; ctx.font='10px IBM Plex Mono,monospace';
-    ctx.textAlign='center';
-    ctx.fillText(val, x, H-PAD_BOT+14);
+    ctx.textAlign='right';
+    ctx.fillText(v, PAD_LEFT-4, y+4);
   }
 
-  // Línea de eje vertical izquierdo
-  ctx.beginPath(); ctx.strokeStyle='#CBD5E1'; ctx.lineWidth=1.5;
-  ctx.moveTo(PAD_LEFT, PAD_TOP); ctx.lineTo(PAD_LEFT, H-PAD_BOT); ctx.stroke();
+  // Dibujar cada barra
+  ESTADOS.forEach((est,i)=>{
+    const x=PAD_LEFT + groupW*i + (groupW-barW)/2;
+    const barH=est.value===0?2:Math.max((est.value/maxVal)*chartH, 4);
+    const y=PAD_TOP+chartH-barH;
 
-  // Barras por encargado
-  labels.forEach((lbl, ri)=>{
-    const d=byEnc[lbl];
-    const groupY=PAD_TOP + ri*ROW_H + (ROW_H-GROUP_H)/2;
+    // Sombra suave
+    ctx.shadowColor='rgba(0,0,0,0.10)';
+    ctx.shadowBlur=8;
+    ctx.shadowOffsetY=3;
 
-    // Fondo alterno de fila
-    if(ri%2===0){
-      ctx.fillStyle='#F8FAFC';
-      ctx.fillRect(PAD_LEFT, PAD_TOP+ri*ROW_H, CHART_W, ROW_H);
-    }
-
-    // Nombre del encargado
-    ctx.fillStyle='#0F1F3D';
-    ctx.font='bold 11px IBM Plex Sans,sans-serif';
-    ctx.textAlign='right';
-    // Nombre completo, truncado si es muy largo
-    const displayName=lbl.length>20?lbl.slice(0,18)+'…':lbl;
-    ctx.fillText(displayName, PAD_LEFT-10, groupY+GROUP_H/2+4);
-
-    // Total a la derecha
-    ctx.fillStyle='#64748B';
-    ctx.font='bold 11px IBM Plex Mono,monospace';
-    ctx.textAlign='left';
-    ctx.fillText('Total: '+d.total, W-PAD_RIGHT+6, groupY+GROUP_H/2+4);
-
-    // Barras por estado
-    ESTADOS.forEach((est, ei)=>{
-      const v=d[est.key]||0;
-      const barW=v===0?0:Math.max((v/maxVal)*CHART_W, 4);
-      const barY=groupY+ei*(BAR_H+BAR_GAP);
-
-      // Barra de fondo (track)
-      ctx.fillStyle='#F1F5F9';
-      ctx.beginPath();
-      hRoundRect(ctx, PAD_LEFT, barY, CHART_W, BAR_H, 4);
-      ctx.fill();
-
-      // Barra de valor
-      if(v>0){
-        ctx.fillStyle=est.color;
-        ctx.beginPath();
-        hRoundRect(ctx, PAD_LEFT, barY, barW, BAR_H, 4);
-        ctx.fill();
-
-        // Etiqueta de cantidad dentro o fuera de la barra
-        ctx.font='bold 10px IBM Plex Mono,monospace';
-        if(barW>28){
-          ctx.fillStyle='white';
-          ctx.textAlign='left';
-          ctx.fillText(v, PAD_LEFT+6, barY+BAR_H-3);
-        } else {
-          ctx.fillStyle=est.color;
-          ctx.textAlign='left';
-          ctx.fillText(v, PAD_LEFT+barW+4, barY+BAR_H-3);
-        }
-      } else {
-        // Sin datos
-        ctx.fillStyle='#CBD5E1';
-        ctx.font='10px IBM Plex Sans,sans-serif';
-        ctx.textAlign='left';
-        ctx.fillText('0', PAD_LEFT+6, barY+BAR_H-3);
-      }
-    });
-  });
-
-  // Leyenda inferior
-  const legY=H-PAD_BOT+28;
-  let lx=PAD_LEFT;
-  ESTADOS.forEach(est=>{
-    // Cuadrado de color
+    // Barra principal con esquinas redondeadas arriba
     ctx.fillStyle=est.color;
     ctx.beginPath();
-    ctx.roundRect(lx, legY-10, 12, 12, 3);
+    ctx.moveTo(x+6, y);
+    ctx.lineTo(x+barW-6, y);
+    ctx.quadraticCurveTo(x+barW, y, x+barW, y+6);
+    ctx.lineTo(x+barW, y+barH);
+    ctx.lineTo(x, y+barH);
+    ctx.lineTo(x, y+6);
+    ctx.quadraticCurveTo(x, y, x+6, y);
+    ctx.closePath();
     ctx.fill();
+
+    ctx.shadowColor='transparent'; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
+
+    // Número encima de la barra
+    ctx.fillStyle='#0F1F3D';
+    ctx.font='bold 22px IBM Plex Mono,monospace';
+    ctx.textAlign='center';
+    ctx.fillText(est.value, x+barW/2, y-10);
+
+    // Porcentaje debajo del número
+    const pct=Math.round(est.value/total*100);
+    ctx.fillStyle=est.color;
+    ctx.font='bold 11px IBM Plex Sans,sans-serif';
+    ctx.fillText(pct+'%', x+barW/2, y-28);
+
+    // Etiqueta de estado debajo de la barra
     ctx.fillStyle='#374151';
-    ctx.font='11px IBM Plex Sans,sans-serif';
-    ctx.textAlign='left';
-    ctx.fillText(est.label, lx+16, legY);
-    lx+=ctx.measureText(est.label).width+40;
+    ctx.font='bold 12px IBM Plex Sans,sans-serif';
+    ctx.fillText(est.label, x+barW/2, PAD_TOP+chartH+18);
+
+    // Línea de color debajo de la etiqueta
+    ctx.fillStyle=est.color;
+    ctx.fillRect(x+barW/2-18, PAD_TOP+chartH+24, 36, 3);
   });
 
-  // Título del eje X
+  // Título eje Y
+  ctx.save();
+  ctx.translate(10, PAD_TOP+chartH/2);
+  ctx.rotate(-Math.PI/2);
   ctx.fillStyle='#94A3B8';
   ctx.font='10px IBM Plex Sans,sans-serif';
   ctx.textAlign='center';
-  ctx.fillText('Cantidad de procesos', PAD_LEFT+CHART_W/2, H-8);
-}
-
-function hRoundRect(ctx,x,y,w,h,r){
-  if(w<r*2) r=w/2;
-  if(h<r*2) r=h/2;
-  ctx.beginPath();
-  ctx.moveTo(x+r,y);
-  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
-  ctx.closePath();
+  ctx.fillText('N° de procesos', 0, 0);
+  ctx.restore();
 }
 
 function drawPieChart(values){
