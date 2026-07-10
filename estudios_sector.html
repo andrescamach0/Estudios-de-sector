@@ -265,7 +265,52 @@ textarea#entry-text:focus{border-color:var(--accent);}
 .dash-divider{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);padding:4px 0 14px;border-bottom:1px solid var(--border);margin-bottom:20px;display:flex;align-items:center;gap:10px;}
 .dash-divider::after{content:'';flex:1;height:1px;background:var(--border);}
 
-/* ── FILTROS RÁPIDOS ── */
+/* ── TARJETAS MÓVIL ── */
+.cards-grid{display:none;padding:0 16px 24px;gap:12px;flex-direction:column;}
+@media(max-width:640px){
+  .table-wrap{display:none;}
+  .cards-grid{display:flex;}
+  header,.toolbar,.stats-bar,.filter-bar,.adv-search-wrap,.dash-wrap,.nav-tabs,.admin-wrap{padding-left:14px;padding-right:14px;}
+  .toolbar{flex-wrap:wrap;gap:8px;}
+  .search-wrap{margin-left:0;width:100%;}
+  .search-wrap input{width:100%;}
+  .form-grid{grid-template-columns:1fr;}
+  .dash-kpis{grid-template-columns:1fr 1fr;}
+  .charts-row{grid-template-columns:1fr;}
+}
+.process-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);transition:box-shadow .15s;}
+.process-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.10);}
+.pc-header{padding:12px 14px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+.pc-ticket{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--navy);background:var(--accent-light);padding:3px 10px;border-radius:5px;}
+.pc-estado{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;}
+.pc-estado.en-curso{background:var(--accent-light);color:#1D4ED8;}
+.pc-estado.entregado{background:var(--green-light);color:#065F46;}
+.pc-estado.cancelado{background:var(--red-light);color:#991B1B;}
+.pc-body{padding:12px 14px;}
+.pc-objeto{font-size:13px;font-weight:600;color:var(--navy);margin-bottom:10px;line-height:1.4;}
+.pc-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text);}
+.pc-row .pc-icon{font-size:13px;flex-shrink:0;width:18px;text-align:center;}
+.pc-row .pc-val{color:var(--text);}
+.pc-row .pc-label{color:var(--muted);font-size:11px;min-width:70px;}
+.pc-dates{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;padding:10px;background:var(--bg);border-radius:8px;}
+.pc-date-item{display:flex;flex-direction:column;gap:2px;}
+.pc-date-label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
+.pc-date-val{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--navy);}
+.pc-avance{display:flex;align-items:center;gap:6px;margin-top:10px;padding:8px 10px;background:var(--accent-light);border-radius:6px;}
+.pc-avance-dots{display:flex;gap:3px;}
+.pc-avance-dot{width:7px;height:7px;border-radius:50%;background:#BFDBFE;}
+.pc-avance-dot.filled{background:var(--accent);}
+.pc-avance-text{font-size:11px;color:#1D4ED8;font-weight:500;}
+.pc-footer{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;}
+.pc-btn{flex:1;padding:8px;border:1px solid var(--border);background:white;border-radius:8px;font-family:var(--font);font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;transition:all .15s;color:var(--muted);}
+.pc-btn:hover{background:var(--bg);}
+.pc-btn.pc-btn-log{color:var(--accent);border-color:#BFDBFE;background:var(--accent-light);}
+.pc-btn.pc-btn-del{color:var(--red);border-color:#FECACA;}
+.pc-dep{font-size:11px;color:var(--muted);margin-top:4px;padding-top:8px;border-top:1px dashed var(--border);}
+/* Botón flotante móvil */
+.fab{display:none;position:fixed;bottom:24px;right:20px;z-index:50;width:54px;height:54px;border-radius:50%;background:var(--accent);color:white;border:none;font-size:24px;cursor:pointer;box-shadow:0 4px 16px rgba(37,99,235,.4);align-items:center;justify-content:center;transition:all .2s;}
+.fab:hover{background:#1D4ED8;transform:scale(1.08);}
+@media(max-width:640px){.fab{display:flex;} #btn-nuevo{display:none;}}
 .filter-bar{padding:10px 32px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .filter-chip{display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:20px;font-family:var(--font);font-size:12px;font-weight:500;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--muted);transition:all .15s;}
 .filter-chip:hover{border-color:var(--accent);color:var(--accent);}
@@ -481,7 +526,12 @@ textarea#entry-text:focus{border-color:var(--accent);}
         <tbody id="table-body"></tbody>
       </table>
     </div>
+    <!-- Vista de tarjetas (móvil) -->
+    <div class="cards-grid" id="cards-grid"></div>
   </div>
+
+  <!-- Botón flotante móvil -->
+  <button class="fab" onclick="openModal()" title="Nuevo Estudio">＋</button>
 
   <!-- DASHBOARD -->
   <div class="page" id="page-dash">
@@ -1057,6 +1107,48 @@ function renderTable(){
     }).join('');
   }
   updateStats(records);
+  renderCards(data);
+}
+
+function renderCards(data){
+  const grid=document.getElementById('cards-grid'); if(!grid) return;
+  const adm=isAdmin();
+  if(!data.length){
+    grid.innerHTML=`<div class="empty-state"><div class="big-icon">📂</div><p>Sin registros para mostrar.</p></div>`;
+    return;
+  }
+  grid.innerHTML=data.map(r=>{
+    const lbl=STATUS[r.estado]?.label||r.estado||'';
+    const nE=(r.bitacora||[]).length;
+    const canLog=r.estado==='en-curso';
+    const dotsHtml=Array.from({length:Math.min(nE,5)},(_,i)=>
+      `<span class="pc-avance-dot ${i<nE?'filled':''}"></span>`).join('');
+    const depShort=(r.dependencia||'').length>36?(r.dependencia.slice(0,34)+'…'):(r.dependencia||'—');
+    return `<div class="process-card">
+      <div class="pc-header">
+        <span class="pc-ticket">${escHtml(r.ticket||'—')}</span>
+        <span class="pc-estado ${r.estado}">${lbl}</span>
+      </div>
+      <div class="pc-body">
+        <div class="pc-objeto">${escHtml(r.objeto||'Sin objeto definido')}</div>
+        <div class="pc-row"><span class="pc-icon">👤</span><div><div class="pc-label">Encargado</div><div class="pc-val">${escHtml(r.encargado||'—')}</div></div></div>
+        <div class="pc-row"><span class="pc-icon">⚖️</span><div><div class="pc-label">Abogado</div><div class="pc-val">${escHtml(r.abogado||'—')}</div></div></div>
+        ${r.secop?`<div class="pc-row"><span class="pc-icon">📄</span><div><div class="pc-label">SECOP</div><div class="pc-val">${escHtml(r.secop)}</div></div></div>`:''}
+        <div class="pc-dates">
+          <div class="pc-date-item"><span class="pc-date-label">Asignación</span><span class="pc-date-val">${fmtDate(r.fechaAsignacion)||'—'}</span></div>
+          <div class="pc-date-item"><span class="pc-date-label">Entrega</span><span class="pc-date-val">${fmtDate(r.fechaEntrega)||'—'}</span></div>
+        </div>
+        ${nE>0?`<div class="pc-avance"><div class="pc-avance-dots">${dotsHtml}</div><span class="pc-avance-text">${nE} entrada${nE!==1?'s':''} de avance</span></div>`:''}
+        ${r.dependencia?`<div class="pc-dep">🏛️ ${escHtml(depShort)}</div>`:''}
+        ${r.obs?`<div class="pc-dep" style="color:var(--muted)">💬 ${escHtml(r.obs.slice(0,60))}${r.obs.length>60?'…':''}</div>`:''}
+      </div>
+      <div class="pc-footer">
+        <button class="pc-btn pc-btn-log" onclick="openBitacora('${r.id}')">${canLog?'📝 Avance':'📖 Ver'}</button>
+        ${adm?`<button class="pc-btn" onclick="editRecord('${r.id}')">✏️ Editar</button>`:''}
+        ${adm?`<button class="pc-btn pc-btn-del" onclick="deleteRecord('${r.id}')">🗑️</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function changeStatus(id,sel){
