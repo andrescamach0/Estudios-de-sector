@@ -1312,24 +1312,272 @@ function exportJSON(){dl('estudios_sector.json',JSON.stringify(window._records||
 function exportXLSX(){
   if(typeof XLSX==='undefined'){alert('La librería de Excel aún carga. Intenta en unos segundos.');return;}
   const records=window._records||[];
-  const hdrs=['Ticket','Encargado','Abogado','Dependencia','Consec. SECOP','Objeto','F. Asignación','Docs. Definitivos','F. Entrega','Estado','Observaciones','Documento adjunto','N° Entradas Avance'];
-  const mainRows=records.map(r=>[r.ticket||'',r.encargado||'',r.abogado||'',r.dependencia||'',r.secop||'',r.objeto||'',fmtDate(r.fechaAsignacion)||'',fmtDate(r.fechaDocumentos)||'',fmtDate(r.fechaEntrega)||'',STATUS[r.estado]?.label||r.estado||'',r.obs||'',r.fileName||'',(r.bitacora||[]).length]);
-  const ws=XLSX.utils.aoa_to_sheet([hdrs,...mainRows]);
-  ws['!cols']=[{wch:12},{wch:22},{wch:24},{wch:38},{wch:18},{wch:40},{wch:14},{wch:16},{wch:14},{wch:12},{wch:30},{wch:22},{wch:8}];
-  const bitHdrs=['Ticket','Objeto','Encargado','Abogado','Estado','Fecha del Avance','Registrado por','Descripción del Avance'];
-  const bitData=[bitHdrs];
+
+  // ── Helpers de estilo ──────────────────────────────────
+  const NAVY   = '0F1F3D';
+  const GOLD   = 'F59E0B';
+  const WHITE  = 'FFFFFF';
+  const GRAY_H = 'F1F5F9';
+  const GRAY_L = 'F8FAFC';
+  const BLUE_L = 'DBEAFE';
+  const GREEN_L= 'D1FAE5';
+  const RED_L  = 'FEE2E2';
+  const BLUE   = '2563EB';
+  const GREEN  = '059669';
+  const RED    = 'DC2626';
+  const BORDER = 'E2E8F0';
+
+  function thinBorder(){
+    const s={style:'thin',color:{rgb:BORDER}};
+    return {top:s,bottom:s,left:s,right:s};
+  }
+  function medBorder(){
+    const s={style:'medium',color:{rgb:NAVY}};
+    return {top:s,bottom:s,left:s,right:s};
+  }
+
+  function hdrCell(v, bg=NAVY, fg=WHITE, sz=10){
+    return {v, t:'s', s:{
+      font:{name:'Arial',bold:true,color:{rgb:fg},sz},
+      fill:{fgColor:{rgb:bg}},
+      alignment:{horizontal:'center',vertical:'center',wrapText:true},
+      border:medBorder()
+    }};
+  }
+  function dataCell(v, bg=WHITE, bold=false, align='left', color='1E293B', sz=9){
+    return {v:v??'', t:'s', s:{
+      font:{name:'Arial',bold,color:{rgb:color},sz},
+      fill:{fgColor:{rgb:bg}},
+      alignment:{horizontal:align,vertical:'center',wrapText:false},
+      border:thinBorder()
+    }};
+  }
+  function wrapCell(v, bg=WHITE, sz=9){
+    return {v:v??'', t:'s', s:{
+      font:{name:'Arial',color:{rgb:'1E293B'},sz},
+      fill:{fgColor:{rgb:bg}},
+      alignment:{horizontal:'left',vertical:'top',wrapText:true},
+      border:thinBorder()
+    }};
+  }
+  function statusCell(estado){
+    const map={
+      'En Curso': {bg:BLUE_L,  fg:BLUE},
+      'Entregado':{bg:GREEN_L, fg:GREEN},
+      'Cancelado':{bg:RED_L,   fg:RED},
+    };
+    const s=map[estado]||{bg:GRAY_H,fg:NAVY};
+    return {v:estado??'', t:'s', s:{
+      font:{name:'Arial',bold:true,color:{rgb:s.fg},sz:9},
+      fill:{fgColor:{rgb:s.bg}},
+      alignment:{horizontal:'center',vertical:'center'},
+      border:thinBorder()
+    }};
+  }
+  function numCell(v, bg=WHITE){
+    return {v:v??0, t:'n', s:{
+      font:{name:'Arial',bold:true,color:{rgb:NAVY},sz:10},
+      fill:{fgColor:{rgb:bg}},
+      alignment:{horizontal:'center',vertical:'center'},
+      border:thinBorder()
+    }};
+  }
+
+  function aoa_styled(data){
+    const ws={};
+    let maxC=0;
+    data.forEach((row,r)=>{
+      row.forEach((cell,c)=>{
+        if(c>maxC) maxC=c;
+        const ref=XLSX.utils.encode_cell({r,c});
+        if(cell && typeof cell==='object' && 'v' in cell) ws[ref]=cell;
+        else ws[ref]={v:cell??'',t:'s'};
+      });
+    });
+    ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:data.length-1,c:maxC}});
+    return ws;
+  }
+
+  // ══════════════════════════════════════════════════════
+  // HOJA 1 — BASE DE DATOS
+  // ══════════════════════════════════════════════════════
+  const COLS=['Ticket','Encargado','Abogado','Dependencia','Consec. SECOP',
+              'Objeto','F. Asignación','Docs. Definitivos','F. Entrega',
+              'Estado','Observaciones','Documento Adjunto','Entradas Avance'];
+
+  // Fila 1: Banner institucional (merged via !merges)
+  const bannerCell={v:'MINISTERIO DE RELACIONES EXTERIORES — ESTUDIOS DE SECTOR',t:'s',s:{
+    font:{name:'Arial',bold:true,color:{rgb:WHITE},sz:14},
+    fill:{fgColor:{rgb:NAVY}},
+    alignment:{horizontal:'center',vertical:'center'},
+  }};
+
+  // Fila 2: Sub-banner dorado
+  const subCell={v:'Gestión y Seguimiento de Procesos de Contratación',t:'s',s:{
+    font:{name:'Arial',italic:true,color:{rgb:NAVY},sz:10},
+    fill:{fgColor:{rgb:GOLD}},
+    alignment:{horizontal:'center',vertical:'center'},
+  }};
+
+  // Construye filas de datos
+  const dataRows=records.map((r,idx)=>{
+    const bg=idx%2===0?WHITE:GRAY_L;
+    const lbl=STATUS[r.estado]?.label||r.estado||'';
+    return [
+      dataCell(r.ticket||'',bg,true,'center',NAVY),
+      dataCell(r.encargado||'',bg,true,'left',NAVY),
+      dataCell(r.abogado||'',bg),
+      wrapCell(r.dependencia||'',bg),
+      dataCell(r.secop||'',bg,false,'center'),
+      wrapCell(r.objeto||'',bg),
+      dataCell(fmtDate(r.fechaAsignacion)||'',bg,false,'center'),
+      dataCell(fmtDate(r.fechaDocumentos)||'',bg,false,'center'),
+      dataCell(fmtDate(r.fechaEntrega)||'',bg,false,'center'),
+      statusCell(lbl),
+      wrapCell(r.obs||'',bg),
+      dataCell(r.fileName||'Sin archivo',bg,false,'left','64748B'),
+      numCell((r.bitacora||[]).length, bg),
+    ];
+  });
+
+  const ws1Data=[
+    [bannerCell,...Array(12).fill({v:'',t:'s',s:{fill:{fgColor:{rgb:NAVY}}}})],
+    [subCell,   ...Array(12).fill({v:'',t:'s',s:{fill:{fgColor:{rgb:GOLD}}}})],
+    COLS.map(h=>hdrCell(h,NAVY,WHITE,9)),
+    ...dataRows,
+  ];
+
+  const ws1=aoa_styled(ws1Data);
+  ws1['!cols']=[
+    {wch:12},{wch:20},{wch:22},{wch:36},{wch:15},
+    {wch:38},{wch:13},{wch:15},{wch:13},{wch:12},
+    {wch:28},{wch:20},{wch:8}
+  ];
+  ws1['!rows']=[{hpt:28},{hpt:16},{hpt:32},...dataRows.map(()=>({hpt:18}))];
+  ws1['!merges']=[
+    {s:{r:0,c:0},e:{r:0,c:12}},
+    {s:{r:1,c:0},e:{r:1,c:12}},
+  ];
+
+  // ══════════════════════════════════════════════════════
+  // HOJA 2 — BITÁCORA DE AVANCE
+  // ══════════════════════════════════════════════════════
+  const BIT_COLS=['Ticket','Objeto / Proceso','Encargado','Abogado',
+                  'Estado','Fecha del Avance','Registrado por','Descripción del Avance'];
+
+  const bitRows=[];
   records.forEach(r=>{
     const entradas=(r.bitacora||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
-    if(!entradas.length){bitData.push([r.ticket||'',r.objeto||'',r.encargado||'',r.abogado||'',STATUS[r.estado]?.label||r.estado||'','','','Sin entradas de avance']);}
-    else{entradas.forEach((e,idx)=>{bitData.push([idx===0?(r.ticket||''):'',idx===0?(r.objeto||''):'',idx===0?(r.encargado||''):'',idx===0?(r.abogado||''):'',idx===0?(STATUS[r.estado]?.label||r.estado||''):'',fmtDate(e.date)||e.date||'',e.author||'',e.text||'']);});}
-    bitData.push(['','','','','','','','']);
+    const lbl=STATUS[r.estado]?.label||r.estado||'';
+    if(!entradas.length){
+      bitRows.push([
+        dataCell(r.ticket||'',GRAY_L,true,'center',NAVY),
+        wrapCell(r.objeto||'',GRAY_L),
+        dataCell(r.encargado||'',GRAY_L,true),
+        dataCell(r.abogado||'',GRAY_L),
+        statusCell(lbl),
+        dataCell('—',GRAY_L,false,'center','94A3B8'),
+        dataCell('—',GRAY_L,false,'left','94A3B8'),
+        dataCell('Sin entradas de avance registradas',GRAY_L,false,'left','94A3B8'),
+      ]);
+    } else {
+      entradas.forEach((e,idx)=>{
+        const bg=idx%2===0?WHITE:GRAY_L;
+        bitRows.push([
+          idx===0?dataCell(r.ticket||'',WHITE,true,'center',NAVY):{v:'',t:'s',s:{fill:{fgColor:{rgb:WHITE}},border:thinBorder()}},
+          idx===0?wrapCell(r.objeto||'',WHITE):{v:'',t:'s',s:{fill:{fgColor:{rgb:WHITE}},border:thinBorder()}},
+          idx===0?dataCell(r.encargado||'',WHITE,true):{v:'',t:'s',s:{fill:{fgColor:{rgb:WHITE}},border:thinBorder()}},
+          idx===0?dataCell(r.abogado||'',WHITE):{v:'',t:'s',s:{fill:{fgColor:{rgb:WHITE}},border:thinBorder()}},
+          idx===0?statusCell(lbl):{v:'',t:'s',s:{fill:{fgColor:{rgb:WHITE}},border:thinBorder()}},
+          dataCell(fmtDate(e.date)||e.date||'',bg,true,'center',BLUE),
+          dataCell(e.author||'',bg,false,'left','374151'),
+          wrapCell(e.text||'',bg),
+        ]);
+      });
+    }
+    // Fila separadora
+    bitRows.push(Array(8).fill({v:'',t:'s',s:{fill:{fgColor:{rgb:'F0F4F8'}},border:thinBorder()}}));
   });
-  const wsBit=XLSX.utils.aoa_to_sheet(bitData);
-  wsBit['!cols']=[{wch:12},{wch:35},{wch:22},{wch:24},{wch:12},{wch:16},{wch:22},{wch:70}];
+
+  const ws2Data=[
+    [{v:'MINISTERIO DE RELACIONES EXTERIORES — BITÁCORA DE AVANCE POR PROCESO',t:'s',s:{
+      font:{name:'Arial',bold:true,color:{rgb:WHITE},sz:13},
+      fill:{fgColor:{rgb:NAVY}},
+      alignment:{horizontal:'center',vertical:'center'},
+    }},...Array(7).fill({v:'',t:'s',s:{fill:{fgColor:{rgb:NAVY}}}})],
+    [{v:'Registre aquí el avance diario de cada proceso en estado EN CURSO',t:'s',s:{
+      font:{name:'Arial',italic:true,color:{rgb:NAVY},sz:10},
+      fill:{fgColor:{rgb:'FEF9C3'}},
+      alignment:{horizontal:'center',vertical:'center'},
+    }},...Array(7).fill({v:'',t:'s',s:{fill:{fgColor:{rgb:'FEF9C3'}}}})],
+    BIT_COLS.map(h=>hdrCell(h,NAVY,WHITE,9)),
+    ...bitRows,
+  ];
+
+  const ws2=aoa_styled(ws2Data);
+  ws2['!cols']=[{wch:12},{wch:36},{wch:20},{wch:22},{wch:12},{wch:14},{wch:20},{wch:65}];
+  ws2['!rows']=[{hpt:28},{hpt:16},{hpt:32},...bitRows.map(()=>({hpt:36}))];
+  ws2['!merges']=[
+    {s:{r:0,c:0},e:{r:0,c:7}},
+    {s:{r:1,c:0},e:{r:1,c:7}},
+  ];
+
+  // ══════════════════════════════════════════════════════
+  // HOJA 3 — RESUMEN POR ENCARGADO
+  // ══════════════════════════════════════════════════════
+  const byEnc={};
+  records.forEach(r=>{
+    const k=r.encargado||'Sin asignar';
+    if(!byEnc[k]) byEnc[k]={total:0,'en-curso':0,'entregado':0,'cancelado':0};
+    byEnc[k].total++; byEnc[k][r.estado]=(byEnc[k][r.estado]||0)+1;
+  });
+
+  const resRows=Object.keys(byEnc).sort().map((n,idx)=>{
+    const d=byEnc[n];
+    const bg=idx%2===0?WHITE:GRAY_L;
+    return [
+      dataCell(n,bg,true,'left',NAVY),
+      numCell(d.total,bg),
+      {v:d['en-curso']||0,t:'n',s:{font:{name:'Arial',bold:true,color:{rgb:BLUE},sz:10},fill:{fgColor:{rgb:BLUE_L}},alignment:{horizontal:'center',vertical:'center'},border:thinBorder()}},
+      {v:d['entregado']||0,t:'n',s:{font:{name:'Arial',bold:true,color:{rgb:GREEN},sz:10},fill:{fgColor:{rgb:GREEN_L}},alignment:{horizontal:'center',vertical:'center'},border:thinBorder()}},
+      {v:d['cancelado']||0,t:'n',s:{font:{name:'Arial',bold:true,color:{rgb:RED},sz:10},fill:{fgColor:{rgb:RED_L}},alignment:{horizontal:'center',vertical:'center'},border:thinBorder()}},
+    ];
+  });
+
+  const RES_COLS=['Encargado de Estudio','Total Procesos','🔵 En Curso','🟢 Entregado','🔴 Cancelado'];
+  const ws3Data=[
+    [{v:'RESUMEN POR ENCARGADO — ESTUDIOS DE SECTOR',t:'s',s:{
+      font:{name:'Arial',bold:true,color:{rgb:WHITE},sz:13},
+      fill:{fgColor:{rgb:NAVY}},
+      alignment:{horizontal:'center',vertical:'center'},
+    }},...Array(4).fill({v:'',t:'s',s:{fill:{fgColor:{rgb:NAVY}}}})],
+    RES_COLS.map(h=>hdrCell(h,NAVY,WHITE,10)),
+    ...resRows,
+    // Fila de totales
+    [
+      hdrCell('TOTAL GENERAL','1A3260',WHITE,10),
+      numCell(records.length,BLUE_L),
+      numCell(records.filter(r=>r.estado==='en-curso').length,BLUE_L),
+      numCell(records.filter(r=>r.estado==='entregado').length,GREEN_L),
+      numCell(records.filter(r=>r.estado==='cancelado').length,RED_L),
+    ],
+  ];
+
+  const ws3=aoa_styled(ws3Data);
+  ws3['!cols']=[{wch:28},{wch:14},{wch:12},{wch:13},{wch:13}];
+  ws3['!rows']=[{hpt:28},{hpt:28},...resRows.map(()=>({hpt:20})),{hpt:24}];
+  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}];
+
+  // ══════════════════════════════════════════════════════
+  // ARMAR Y DESCARGAR
+  // ══════════════════════════════════════════════════════
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Estudios de Sector');
-  XLSX.utils.book_append_sheet(wb,wsBit,'Bitácora de Avance');
-  XLSX.writeFile(wb,'estudios_sector.xlsx');
+  wb.Props={Title:'Estudios de Sector MRE',Author:'Ministerio de Relaciones Exteriores'};
+  XLSX.utils.book_append_sheet(wb,ws1,'Estudios de Sector');
+  XLSX.utils.book_append_sheet(wb,ws2,'Bitácora de Avance');
+  XLSX.utils.book_append_sheet(wb,ws3,'Resumen por Encargado');
+  XLSX.writeFile(wb,'Estudios_Sector_MRE.xlsx');
+  showSyncToast('✅ Excel exportado correctamente',2500);
 }
 function dl(name,content,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();}
 
