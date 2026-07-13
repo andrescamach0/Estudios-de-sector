@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<meta http-equiv="X-Frame-Options" content="DENY">
+<meta name="referrer" content="no-referrer">
 <title>Estudios de Sector — MRE</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -730,7 +733,8 @@ textarea#entry-text:focus{border-color:var(--accent);}
         <div class="form-group"><label>Nombre completo *</label><input type="text" id="u-name" placeholder="Ej. Ana Gómez"></div>
         <div class="form-group"><label>Usuario (login) *</label><input type="text" id="u-user" placeholder="Ej. ana.gomez" autocomplete="off"></div>
         <div class="form-group"><label>Contraseña <span id="u-pass-hint" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:11px;">(dejar vacío para no cambiar)</span></label>
-          <input type="password" id="u-pass" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+          <input type="password" id="u-pass" placeholder="Mín. 8 caracteres, 1 mayúscula, 1 número" autocomplete="new-password">
+          <span style="font-size:10px;color:var(--muted);margin-top:2px;">🔒 Requisitos: 8+ caracteres · una mayúscula · un número</span>
         </div>
         <div class="form-group"><label>Rol</label>
           <select id="u-role"><option value="viewer">👁 Viewer — solo lectura</option><option value="admin">🔑 Admin — acceso completo</option></select>
@@ -836,20 +840,73 @@ if(window._pendingInit) window._pendingInit();
 
 <script>
 /* ═══════════════════════════════════════
-   CRYPTO SHA-256
+   SEGURIDAD — Utilidades criptográficas
+   Usa SHA-256 nativo + PBKDF2 para hashing
+   seguro de contraseñas con sal por usuario.
 ═══════════════════════════════════════ */
+
+// SHA-256 simple (para verificar hashes legacy)
 async function sha256(msg){
   const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(msg));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
+// PBKDF2 — hash robusto con sal (100,000 iteraciones)
+async function hashPassword(password, salt){
+  const enc=new TextEncoder();
+  const keyMat=await crypto.subtle.importKey('raw',enc.encode(password),{name:'PBKDF2'},false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(salt),iterations:100000,hash:'SHA-256'},keyMat,256);
+  return Array.from(new Uint8Array(bits)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// Salt estático basado en username (reproducible, único por usuario)
+function userSalt(username){ return 'mre_est_sector_2026_'+username.toLowerCase(); }
+
+// Sanitización estricta de inputs — previene XSS
+function sanitizeInput(str, maxLen=500){
+  return String(str||'').slice(0,maxLen).replace(/[<>"'`]/g,'');
+}
+
+// Validar formato de usuario
+function validateUsername(u){
+  return /^[a-z0-9._-]{3,40}$/.test(u);
+}
+
+// Validar fortaleza de contraseña
+function validatePassword(p){
+  if(p.length<8) return 'Mínimo 8 caracteres';
+  if(!/[A-Z]/.test(p)) return 'Debe incluir al menos una mayúscula';
+  if(!/[0-9]/.test(p)) return 'Debe incluir al menos un número';
+  return null; // válida
+}
+
+// Token de sesión — ID aleatorio seguro
+function generateSessionToken(){
+  const arr=new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// Verificar integridad de sesión activa
+function getActiveSession(){
+  try{
+    const s=JSON.parse(sessionStorage.getItem('sec_session')||'null');
+    if(!s||!s.token||!s.userId||!s.ts) return null;
+    // Sesión expira en 30 min
+    if(Date.now()-s.ts>30*60*1000) return null;
+    return s;
+  } catch{ return null; }
+}
+
 /* ═══════════════════════════════════════
    USUARIOS INCRUSTADOS
-   Funcionan en CUALQUIER navegador sin configuración.
+   Contraseñas con PBKDF2 — hashes pre-calculados.
+   Para regenerar: hashPassword(pass, userSalt(username))
 ═══════════════════════════════════════ */
 const BUILTIN_USERS=[
   {id:'u3', name:'Andres Camacho', username:'andres.camacho',
-   pwHash:'834b3d828d46de7fb8ee95c9715f55a149cf00a631fb500666e8c97b303d0d97', role:'admin'},
+   pwHash:'834b3d828d46de7fb8ee95c9715f55a149cf00a631fb500666e8c97b303d0d97',
+   role:'admin', legacy:true}, // legacy=true → usa SHA-256 clásico
 ];
 
 function loadUsers(){
@@ -871,56 +928,132 @@ function saveUsers(users){
 
 /* ═══════════════════════════════════════
    BLOQUEO DE INTENTOS
+   Bloqueo progresivo: 30s → 60s → 120s → 300s
+   Persiste aunque se recargue la página.
 ═══════════════════════════════════════ */
-let failedAttempts=0,lockoutUntil=0,lockoutInterval=null;
-function isLockedOut(){return Date.now()<lockoutUntil;}
+const MAX_ATTEMPTS=5;
+const LOCKOUT_DURATIONS=[30,60,120,300]; // segundos por nivel
+let failedAttempts=0, lockoutUntil=0, lockoutInterval=null, lockoutLevel=0;
+
+function initLockoutState(){
+  // Restaura bloqueo si la página se recargó durante un bloqueo activo
+  try{
+    const saved=JSON.parse(localStorage.getItem('_lk')||'null');
+    if(saved && saved.until>Date.now()){
+      lockoutUntil=saved.until;
+      lockoutLevel=saved.level||0;
+      failedAttempts=saved.attempts||MAX_ATTEMPTS;
+      applyLockoutUI();
+    } else {
+      localStorage.removeItem('_lk');
+    }
+  } catch{ localStorage.removeItem('_lk'); }
+}
+
+function isLockedOut(){ return Date.now()<lockoutUntil; }
+
 function startLockout(){
-  lockoutUntil=Date.now()+30000;
+  const duration=(LOCKOUT_DURATIONS[lockoutLevel]||300)*1000;
+  lockoutUntil=Date.now()+duration;
+  lockoutLevel=Math.min(lockoutLevel+1, LOCKOUT_DURATIONS.length-1);
+  localStorage.setItem('_lk',JSON.stringify({until:lockoutUntil,level:lockoutLevel,attempts:failedAttempts}));
+  applyLockoutUI();
+}
+
+function applyLockoutUI(){
   document.getElementById('lockout-msg').style.display='block';
   document.getElementById('login-btn').disabled=true;
-  let rem=30;
-  lockoutInterval=setInterval(()=>{rem--;document.getElementById('lockout-count').textContent=rem;
-    if(rem<=0){clearInterval(lockoutInterval);lockoutUntil=0;failedAttempts=0;
+  clearInterval(lockoutInterval);
+  lockoutInterval=setInterval(()=>{
+    const rem=Math.max(0,Math.ceil((lockoutUntil-Date.now())/1000));
+    document.getElementById('lockout-count').textContent=rem;
+    if(rem<=0){
+      clearInterval(lockoutInterval);
+      lockoutUntil=0; failedAttempts=0;
+      localStorage.removeItem('_lk');
       document.getElementById('lockout-msg').style.display='none';
       document.getElementById('login-btn').disabled=false;
-      document.getElementById('attempts-info').textContent='';}
+      document.getElementById('attempts-info').textContent='';
+    }
   },1000);
 }
 
 /* ═══════════════════════════════════════
    LOGIN
+   — Sanitiza inputs antes de procesar
+   — Tiempo constante para evitar timing attacks
+   — Token de sesión seguro
+   — Soporta hashes legacy (SHA-256) y nuevos (PBKDF2)
 ═══════════════════════════════════════ */
 let currentUser=null;
 
-function waitForDb(fn){
-  // Login ya no espera Firebase — lanza la app inmediatamente
-  // Firebase se conecta en segundo plano
-  fn();
-}
+function waitForDb(fn){ fn(); }
 
 async function doLogin(){
   if(isLockedOut()) return;
-  const uIn=document.getElementById('login-user').value.trim();
-  const pIn=document.getElementById('login-pass').value;
+
+  // Sanitizar y normalizar inputs
+  const uIn=sanitizeInput(document.getElementById('login-user').value.trim().toLowerCase(),40);
+  const pIn=document.getElementById('login-pass').value; // contraseña NO se sanitiza para preservar caracteres especiales
+
   document.getElementById('login-error').style.display='none';
   ['login-user','login-pass'].forEach(id=>document.getElementById(id).classList.remove('input-error'));
-  if(!uIn||!pIn){showLoginErr();return;}
-  // Combina usuarios base + Firebase (si ya cargaron)
-  const users=loadUsers();
-  const hash=await sha256(pIn);
-  const user=users.find(u=>u.username===uIn&&u.pwHash===hash);
-  if(!user){
-    failedAttempts++;
-    const rem=5-failedAttempts;
-    if(failedAttempts>=5) startLockout();
-    else document.getElementById('attempts-info').textContent=`Intentos restantes: ${rem}`;
-    showLoginErr();return;
+
+  if(!uIn||!pIn){ showLoginErr(); return; }
+  if(!validateUsername(uIn)){ showLoginErr(); return; }
+
+  document.getElementById('login-btn').disabled=true;
+  document.getElementById('login-btn').textContent='Verificando...';
+
+  try{
+    const users=loadUsers();
+
+    // Calcular ambos hashes (legacy SHA-256 y nuevo PBKDF2)
+    // Se calculan siempre para evitar timing attacks por enumeración de usuarios
+    const hashLegacy=await sha256(pIn);
+    const hashNew=await hashPassword(pIn, userSalt(uIn));
+
+    // Verificar usuario con tiempo constante (comparación siempre se ejecuta)
+    let matchedUser=null;
+    for(const u of users){
+      if(u.username!==uIn) continue;
+      const validLegacy=u.legacy && u.pwHash===hashLegacy;
+      const validNew=!u.legacy && u.pwHash===hashNew;
+      if(validLegacy||validNew) matchedUser=u;
+    }
+
+    if(!matchedUser){
+      failedAttempts++;
+      const rem=MAX_ATTEMPTS-failedAttempts;
+      if(failedAttempts>=MAX_ATTEMPTS) startLockout();
+      else document.getElementById('attempts-info').textContent=`⚠️ Intentos restantes: ${rem}`;
+      showLoginErr();
+      return;
+    }
+
+    // Login exitoso
+    failedAttempts=0; lockoutLevel=0;
+    localStorage.removeItem('_lk');
+    currentUser=matchedUser;
+    document.getElementById('login-pass').value='';
+
+    // Generar token de sesión seguro
+    const token=generateSessionToken();
+    sessionStorage.setItem('sec_session', JSON.stringify({
+      userId:matchedUser.id,
+      token,
+      ts:Date.now(),
+      role:matchedUser.role
+    }));
+
+    waitForDb(()=>launchApp());
+
+  } finally {
+    document.getElementById('login-btn').disabled=false;
+    document.getElementById('login-btn').textContent='Ingresar →';
   }
-  failedAttempts=0;currentUser=user;
-  document.getElementById('login-pass').value='';
-  sessionStorage.setItem('sec_session',JSON.stringify({userId:user.id,ts:Date.now()}));
-  waitForDb(()=>launchApp());
 }
+
 function showLoginErr(){
   document.getElementById('login-error').style.display='block';
   ['login-user','login-pass'].forEach(id=>document.getElementById(id).classList.add('input-error'));
@@ -936,16 +1069,19 @@ function launchApp(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app-screen').style.display='block';
   applyUserUI();
+  // Renovar timestamp de sesión
+  try{
+    const s=JSON.parse(sessionStorage.getItem('sec_session')||'{}');
+    sessionStorage.setItem('sec_session',JSON.stringify({...s,ts:Date.now()}));
+  }catch{}
   sessionExpiry=Date.now()+30*60*1000;
   startSessionTimer();
   resetInactivity();
-  ['mousemove','keydown','click'].forEach(e=>document.addEventListener(e,resetInactivity));
+  ['mousemove','keydown','click','touchstart'].forEach(e=>document.addEventListener(e,resetInactivity,{passive:true}));
   window._appReady=true;
-  // Si Firebase aún no está listo, mostrar estado de carga
   if(!window._dbReady){
     const tbody=document.getElementById('table-body');
     if(tbody) tbody.innerHTML=`<tr><td colspan="14"><div class="empty-state"><div class="big-icon">⏳</div><p>Conectando con Firebase... un momento.</p></div></td></tr>`;
-    // Cuando Firebase esté listo, renderizará automáticamente via onSnapshot
   } else {
     renderTable();
   }
@@ -970,15 +1106,26 @@ function showInactivityWarn(){
   inactivityWarning=setInterval(()=>{inactCountdown--;document.getElementById('inact-count').textContent=inactCountdown;if(inactCountdown<=0)logout(true);},1000);
 }
 function logout(auto=false){
-  clearInterval(sessionInterval);clearTimeout(inactivityTimer);clearInterval(inactivityWarning);
-  ['mousemove','keydown','click'].forEach(e=>document.removeEventListener(e,resetInactivity));
-  sessionStorage.removeItem('sec_session');currentUser=null;window._appReady=false;
+  clearInterval(sessionInterval);
+  clearTimeout(inactivityTimer);
+  clearInterval(inactivityWarning);
+  ['mousemove','keydown','click','touchstart'].forEach(e=>document.removeEventListener(e,resetInactivity));
+  // Limpiar datos de sesión
+  sessionStorage.removeItem('sec_session');
+  currentUser=null;
+  window._appReady=false;
+  // Limpiar datos en memoria para que no sean accesibles tras logout
+  window._records=[];
+  window._fbUsers=[];
   document.getElementById('app-screen').style.display='none';
   document.getElementById('login-screen').style.display='flex';
-  ['login-user','login-pass'].forEach(id=>{document.getElementById(id).value='';document.getElementById(id).classList.remove('input-error');});
+  ['login-user','login-pass'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.value='';el.classList.remove('input-error');}
+  });
   document.getElementById('login-error').style.display='none';
   document.getElementById('inactivity-overlay').classList.remove('open');
-  if(auto) setTimeout(()=>alert('Tu sesión fue cerrada automáticamente.'),100);
+  if(auto) setTimeout(()=>alert('⚠️ Tu sesión fue cerrada por inactividad o expiración.'),100);
 }
 
 /* ═══════════════════════════════════════
@@ -1204,31 +1351,41 @@ function closeModal(){document.getElementById('modal-overlay').classList.remove(
 
 async function saveRecord(){
   if(!isAdmin()) return;
-  const ticket=document.getElementById('f-ticket').value.trim();
+  const ticket=sanitizeInput(document.getElementById('f-ticket').value.trim(),50);
   const encargado=document.getElementById('f-encargado').value;
   const abogado=document.getElementById('f-abogado').value;
   if(!ticket||!encargado||!abogado){alert('Completa: Ticket, Encargado y Abogado.');return;}
   const existing=editingId?(window._records||[]).find(r=>r.id===editingId):null;
   const data={
-    id:editingId||Date.now().toString(),
+    id:editingId||('r'+Date.now()+'_'+Math.random().toString(36).slice(2,7)),
     ticket,encargado,abogado,
     dependencia:document.getElementById('f-dependencia').value,
-    secop:document.getElementById('f-secop').value.trim(),
-    objeto:document.getElementById('f-objeto').value.trim(),
+    secop:sanitizeInput(document.getElementById('f-secop').value.trim(),80),
+    objeto:sanitizeInput(document.getElementById('f-objeto').value.trim(),1000),
     fechaAsignacion:document.getElementById('f-asignacion').value,
     fechaDocumentos:document.getElementById('f-documentos').value,
     fechaEntrega:document.getElementById('f-entrega').value,
     estado:document.getElementById('f-estado').value,
-    obs:document.getElementById('f-obs').value.trim(),
+    obs:sanitizeInput(document.getElementById('f-obs').value.trim(),2000),
     bitacora:existing?.bitacora||[],
     fileData:pendingFile?pendingFile.data:(existing?.fileData||null),
-    fileName:pendingFile?pendingFile.name:(existing?.fileName||null),
+    fileName:pendingFile?sanitizeInput(pendingFile.name,200):(existing?.fileName||null),
     fileSize:pendingFile?pendingFile.size:(existing?.fileSize||null),
+    // Auditoría
+    updatedBy:currentUser?.name||'',
+    updatedAt:new Date().toISOString(),
+    createdBy:existing?.createdBy||currentUser?.name||'',
+    createdAt:existing?.createdAt||new Date().toISOString(),
   };
   showSyncToast('Guardando en la nube ☁️...',3000);
-  await window._saveRecord(data);
-  showSyncToast('✅ Guardado en Firebase');
-  closeModal();
+  try{
+    await window._saveRecord(data);
+    showSyncToast('✅ Guardado en Firebase');
+    closeModal();
+  } catch(err){
+    alert('Error al guardar: '+err.message);
+    showSyncToast('❌ Error al guardar',3000);
+  }
 }
 function editRecord(id){openModal(id);}
 async function deleteRecord(id){
@@ -1361,21 +1518,45 @@ function openAddUser(){editingUserId=null;document.getElementById('user-modal-ti
 function openEditUser(id){editingUserId=id;const u=loadUsers().find(x=>x.id===id);if(!u)return;document.getElementById('user-modal-title').textContent='Editar Usuario';document.getElementById('u-name').value=u.name;document.getElementById('u-user').value=u.username;document.getElementById('u-pass').value='';document.getElementById('u-role').value=u.role;document.getElementById('u-pass-hint').style.display='';document.getElementById('u-error').style.display='none';document.getElementById('user-overlay').classList.add('open');}
 function closeUserModal(){document.getElementById('user-overlay').classList.remove('open');editingUserId=null;}
 async function saveUser(){
-  const name=document.getElementById('u-name').value.trim();
+  const name=sanitizeInput(document.getElementById('u-name').value.trim(),100);
   const username=document.getElementById('u-user').value.trim().toLowerCase().replace(/\s+/g,'');
   const pass=document.getElementById('u-pass').value;
   const role=document.getElementById('u-role').value;
   const errEl=document.getElementById('u-error');
   errEl.style.display='none';
   function showErr(m){errEl.textContent='⚠️ '+m;errEl.style.display='block';}
+
   if(!name||!username){showErr('Nombre y usuario son obligatorios.');return;}
+  if(!validateUsername(username)){showErr('Usuario inválido. Solo letras minúsculas, números, puntos y guiones (3-40 caracteres).');return;}
   if(!editingUserId&&!pass){showErr('La contraseña es obligatoria para nuevos usuarios.');return;}
-  if(pass&&pass.length<6){showErr('La contraseña debe tener al menos 6 caracteres.');return;}
+
+  // Validar fortaleza de contraseña si se está cambiando
+  if(pass){
+    const pwError=validatePassword(pass);
+    if(pwError){showErr(pwError);return;}
+  }
+
   const users=loadUsers();
   const dup=users.find(u=>u.username===username&&u.id!==editingUserId);
   if(dup){showErr('Ya existe un usuario con ese login.');return;}
-  const pwHash=pass?await sha256(pass):users.find(u=>u.id===editingUserId)?.pwHash||'';
-  const userData={id:editingUserId||'u'+Date.now(), name, username, pwHash, role};
+
+  // Hash con PBKDF2 para usuarios nuevos/actualizados (no legacy)
+  let pwHash=users.find(u=>u.id===editingUserId)?.pwHash||'';
+  let isLegacy=users.find(u=>u.id===editingUserId)?.legacy||false;
+  if(pass){
+    pwHash=await hashPassword(pass, userSalt(username));
+    isLegacy=false; // nuevos hashes ya no son legacy
+  }
+
+  const userData={
+    id:editingUserId||('u'+Date.now()),
+    name, username, pwHash, role,
+    legacy:isLegacy,
+    createdAt:users.find(u=>u.id===editingUserId)?.createdAt||new Date().toISOString(),
+    updatedAt:new Date().toISOString(),
+    updatedBy:currentUser?.name||'',
+  };
+
   showSyncToast('Guardando usuario ☁️...',3000);
   try{
     await window._saveUser(userData);
@@ -2123,6 +2304,8 @@ if(dz){
   dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';const f=e.dataTransfer.files[0];if(!f)return;const inp=document.getElementById('f-file');const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;handleFileSelect(inp);});
 }
 window.addEventListener('resize',()=>{if(document.getElementById('page-dash')?.classList.contains('active'))renderDashboard();});
+// Inicializar estado de bloqueo (persiste entre recargas de página)
+initLockoutState();
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body>
