@@ -381,7 +381,7 @@ textarea#entry-text:focus{border-color:var(--accent);}
       <p>Ministerio de Relaciones Exteriores</p>
     </div>
     <div class="login-body">
-      <div id="lockout-msg">⏳ Demasiados intentos. Espera <span id="lockout-count">30</span>s.</div>
+      <div id="lockout-msg">⏳ Demasiados intentos. Espera <span id="lockout-count">30</span>s. &nbsp;<button onclick="emergencyReset()" style="font-size:10px;background:none;border:1px solid #92400E;color:#92400E;border-radius:4px;padding:2px 6px;cursor:pointer;">Limpiar</button></div>
       <div id="login-error">❌ Usuario o contraseña incorrectos.</div>
       <label>Usuario</label>
       <input type="text" id="login-user" placeholder="tu.usuario" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()">
@@ -935,7 +935,34 @@ const MAX_ATTEMPTS=5;
 const LOCKOUT_DURATIONS=[30,60,120,300]; // segundos por nivel
 let failedAttempts=0, lockoutUntil=0, lockoutInterval=null, lockoutLevel=0;
 
+// Reset de emergencia — limpia bloqueos atascados
+function emergencyReset(){
+  localStorage.removeItem('_lk');
+  localStorage.removeItem('sec_extra_users');
+  localStorage.removeItem('sec_user_mods');
+  failedAttempts=0; lockoutUntil=0; lockoutLevel=0;
+  clearInterval(lockoutInterval);
+  document.getElementById('lockout-msg').style.display='none';
+  document.getElementById('login-btn').disabled=false;
+  document.getElementById('login-btn').textContent='Ingresar →';
+  document.getElementById('attempts-info').textContent='';
+  document.getElementById('login-error').style.display='none';
+  ['login-user','login-pass'].forEach(id=>document.getElementById(id).classList.remove('input-error'));
+}
+
 function initLockoutState(){
+  try{
+    const saved=JSON.parse(localStorage.getItem('_lk')||'null');
+    if(saved && saved.until>Date.now()){
+      lockoutUntil=saved.until;
+      lockoutLevel=saved.level||0;
+      failedAttempts=saved.attempts||MAX_ATTEMPTS;
+      applyLockoutUI();
+    } else {
+      localStorage.removeItem('_lk');
+    }
+  } catch{ localStorage.removeItem('_lk'); }
+}
   // Restaura bloqueo si la página se recargó durante un bloqueo activo
   try{
     const saved=JSON.parse(localStorage.getItem('_lk')||'null');
@@ -992,28 +1019,22 @@ function waitForDb(fn){ fn(); }
 async function doLogin(){
   if(isLockedOut()) return;
 
-  // Sanitizar y normalizar inputs
-  const uIn=sanitizeInput(document.getElementById('login-user').value.trim().toLowerCase(),40);
-  const pIn=document.getElementById('login-pass').value; // contraseña NO se sanitiza para preservar caracteres especiales
+  const uIn=document.getElementById('login-user').value.trim().toLowerCase();
+  const pIn=document.getElementById('login-pass').value;
 
   document.getElementById('login-error').style.display='none';
   ['login-user','login-pass'].forEach(id=>document.getElementById(id).classList.remove('input-error'));
 
   if(!uIn||!pIn){ showLoginErr(); return; }
-  if(!validateUsername(uIn)){ showLoginErr(); return; }
 
   document.getElementById('login-btn').disabled=true;
   document.getElementById('login-btn').textContent='Verificando...';
 
   try{
     const users=loadUsers();
-    const hashLegacy=await sha256(pIn);
+    const hash=await sha256(pIn);
 
-    let matchedUser=null;
-    for(const u of users){
-      if(u.username!==uIn) continue;
-      if(u.pwHash===hashLegacy) matchedUser=u;
-    }
+    const matchedUser=users.find(u=>u.username===uIn && u.pwHash===hash)||null;
 
     if(!matchedUser){
       failedAttempts++;
@@ -1024,23 +1045,23 @@ async function doLogin(){
       return;
     }
 
-    // Login exitoso
+    // Login exitoso — limpiar cualquier bloqueo previo
     failedAttempts=0; lockoutLevel=0;
     localStorage.removeItem('_lk');
     currentUser=matchedUser;
     document.getElementById('login-pass').value='';
+    document.getElementById('attempts-info').textContent='';
 
-    // Generar token de sesión seguro
     const token=generateSessionToken();
     sessionStorage.setItem('sec_session', JSON.stringify({
-      userId:matchedUser.id,
-      token,
-      ts:Date.now(),
-      role:matchedUser.role
+      userId:matchedUser.id, token, ts:Date.now(), role:matchedUser.role
     }));
 
     waitForDb(()=>launchApp());
 
+  } catch(err){
+    console.error('Login error:',err);
+    showLoginErr();
   } finally {
     document.getElementById('login-btn').disabled=false;
     document.getElementById('login-btn').textContent='Ingresar →';
