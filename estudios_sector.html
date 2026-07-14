@@ -1007,19 +1007,12 @@ async function doLogin(){
 
   try{
     const users=loadUsers();
-
-    // Calcular ambos hashes (legacy SHA-256 y nuevo PBKDF2)
-    // Se calculan siempre para evitar timing attacks por enumeración de usuarios
     const hashLegacy=await sha256(pIn);
-    const hashNew=await hashPassword(pIn, userSalt(uIn));
 
-    // Verificar usuario con tiempo constante (comparación siempre se ejecuta)
     let matchedUser=null;
     for(const u of users){
       if(u.username!==uIn) continue;
-      const validLegacy=u.legacy && u.pwHash===hashLegacy;
-      const validNew=!u.legacy && u.pwHash===hashNew;
-      if(validLegacy||validNew) matchedUser=u;
+      if(u.pwHash===hashLegacy) matchedUser=u;
     }
 
     if(!matchedUser){
@@ -1540,18 +1533,15 @@ async function saveUser(){
   const dup=users.find(u=>u.username===username&&u.id!==editingUserId);
   if(dup){showErr('Ya existe un usuario con ese login.');return;}
 
-  // Hash con PBKDF2 para usuarios nuevos/actualizados (no legacy)
+  // Hash con SHA-256
   let pwHash=users.find(u=>u.id===editingUserId)?.pwHash||'';
-  let isLegacy=users.find(u=>u.id===editingUserId)?.legacy||false;
   if(pass){
-    pwHash=await hashPassword(pass, userSalt(username));
-    isLegacy=false; // nuevos hashes ya no son legacy
+    pwHash=await sha256(pass);
   }
 
   const userData={
     id:editingUserId||('u'+Date.now()),
     name, username, pwHash, role,
-    legacy:isLegacy,
     createdAt:users.find(u=>u.id===editingUserId)?.createdAt||new Date().toISOString(),
     updatedAt:new Date().toISOString(),
     updatedBy:currentUser?.name||'',
