@@ -268,6 +268,7 @@ textarea#entry-text:focus{border-color:var(--accent);}
 .dash-divider{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);padding:4px 0 14px;border-bottom:1px solid var(--border);margin-bottom:20px;display:flex;align-items:center;gap:10px;}
 .dash-divider::after{content:'';flex:1;height:1px;background:var(--border);}
 
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 /* ── TARJETAS MÓVIL ── */
 .cards-grid{display:none;padding:0 16px 24px;gap:12px;flex-direction:column;}
 @media(max-width:640px){
@@ -847,11 +848,6 @@ async function sha256(msg){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function sanitizeInput(s,max=500){return String(s||'').slice(0,max);}
-function fmtDate(d){if(!d)return null;const[y,m,day]=d.split('-');return`${day}/${m}/${y}`;}
-function todayISO(){return new Date().toISOString().slice(0,10);}
-
 /* ═══════════════════════════════════
    USUARIOS
 ═══════════════════════════════════ */
@@ -967,7 +963,6 @@ function launchApp(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app-screen').style.display='block';
   applyUserUI();
-  // Renovar timestamp de sesión
   try{
     const s=JSON.parse(sessionStorage.getItem('sec_session')||'{}');
     sessionStorage.setItem('sec_session',JSON.stringify({...s,ts:Date.now()}));
@@ -977,11 +972,28 @@ function launchApp(){
   resetInactivity();
   ['mousemove','keydown','click','touchstart'].forEach(e=>document.addEventListener(e,resetInactivity,{passive:true}));
   window._appReady=true;
-  if(!window._dbReady){
-    const tbody=document.getElementById('table-body');
-    if(tbody) tbody.innerHTML=`<tr><td colspan="14"><div class="empty-state"><div class="big-icon">⏳</div><p>Conectando con Firebase... un momento.</p></div></td></tr>`;
-  } else {
+  // Pre-registrar funciones globales ANTES de que Firebase responda
+  window.renderTable=renderTable;
+  window.renderDashboard=renderDashboard;
+  if(window._dbReady && (window._records||[]).length>=0){
+    // Firebase ya está listo — renderizar inmediatamente
     renderTable();
+  } else {
+    // Firebase aún conectando — mostrar skeleton animado
+    const tbody=document.getElementById('table-body');
+    const grid=document.getElementById('cards-grid');
+    const skeletonRow=`<tr>${Array(14).fill('<td><div style="height:14px;background:linear-gradient(90deg,#E2E8F0 25%,#F1F5F9 50%,#E2E8F0 75%);background-size:200%;animation:shimmer 1.5s infinite;border-radius:4px;"></div></td>').join('')}</tr>`;
+    if(tbody) tbody.innerHTML=Array(5).fill(skeletonRow).join('');
+    if(grid) grid.innerHTML='';
+    // Intentar renderizar cada 300ms hasta que Firebase responda
+    let tries=0;
+    const poll=setInterval(()=>{
+      tries++;
+      if(window._dbReady || tries>30){
+        clearInterval(poll);
+        renderTable();
+      }
+    },300);
   }
 }
 function startSessionTimer(){
@@ -1065,6 +1077,7 @@ function showSyncToast(msg,duration=2000){
 function fmtDate(d){if(!d)return null;const[y,m,day]=d.split('-');return `${day}/${m}/${y}`;}
 function todayISO(){return new Date().toISOString().slice(0,10);}
 function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function sanitizeInput(s,max=500){return String(s||'').slice(0,max);}
 
 /* ═══════════════════════════════════════
    TABS
