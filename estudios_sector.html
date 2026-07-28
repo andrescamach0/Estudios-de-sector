@@ -415,7 +415,7 @@ tr.accordion-row td{padding:0 !important;border-bottom:1px solid var(--border);}
 <div id="app-screen">
   <div id="session-bar">
     <div id="firebase-status"><span class="fb-dot" id="fb-dot"></span><span id="fb-label">Conectando...</span></div>
-    <div>Sesión · <span id="session-user-bar"></span> · Cierra en <span id="session-timer">30:00</span></div>
+    <div>Sesión · <span id="session-user-bar"></span> · Cierra en <span id="session-timer">60:00</span></div>
   </div>
   <header>
     <div class="header-left">
@@ -984,7 +984,7 @@ function launchApp(){
     const s=JSON.parse(sessionStorage.getItem('sec_session')||'{}');
     sessionStorage.setItem('sec_session',JSON.stringify({...s,ts:Date.now()}));
   }catch{}
-  sessionExpiry=Date.now()+30*60*1000;
+  sessionExpiry=Date.now()+60*60*1000;
   startSessionTimer();
   resetInactivity();
   ['mousemove','keydown','click','touchstart'].forEach(e=>document.addEventListener(e,resetInactivity,{passive:true}));
@@ -1025,7 +1025,7 @@ function startSessionTimer(){
 function resetInactivity(){
   clearTimeout(inactivityTimer);clearInterval(inactivityWarning);
   document.getElementById('inactivity-overlay').classList.remove('open');
-  inactivityTimer=setTimeout(showInactivityWarn,15*60*1000);
+  inactivityTimer=setTimeout(showInactivityWarn,30*60*1000);
 }
 function showInactivityWarn(){
   inactCountdown=30;document.getElementById('inact-count').textContent=30;
