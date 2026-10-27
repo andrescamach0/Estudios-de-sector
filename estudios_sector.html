@@ -475,6 +475,18 @@ tr.accordion-row td{padding:0 !important;border-bottom:1px solid var(--border);}
         </select>
       </div>
       <div class="adv-field">
+        <label>Resp.</label>
+        <select id="adv-abogado-resp" onchange="renderTable()">
+          <option value="">Todos</option>
+          <option value="Sin Asignar">Sin Asignar</option>
+          <option>JOHANNA AGUDELO</option><option>YULY LEIVA</option><option>OSCAR VICTORIA</option>
+          <option>NATALIA JIMENEZ</option><option>ALEXANDRA PORTILLO</option><option>JESSICA GUTIERREZ</option>
+          <option>BRIAM BRITO</option><option>JUAN DAVID GUTIERREZ</option><option>TANIA HUMANEZ</option>
+          <option>KATIANA JIMENEZ</option><option>JHOANA MEDINA</option><option>MARIANA GARCIA MORALES</option>
+          <option>CAROLYN RODRIGUEZ</option><option>WILLIAM LEIVA</option><option>RONALD GONGORA</option>
+        </select>
+      </div>
+      <div class="adv-field">
         <label>Dependencia</label>
         <select id="adv-dependencia" onchange="renderTable()">
           <option value="">Todas</option>
@@ -535,6 +547,7 @@ tr.accordion-row td{padding:0 !important;border-bottom:1px solid var(--border);}
           <th onclick="sortBy('objeto')" style="min-width:180px">Objeto</th>
           <th onclick="sortBy('encargado')" style="white-space:nowrap">Encargado</th>
           <th onclick="sortBy('abogado')" style="white-space:nowrap">Abogado</th>
+          <th onclick="sortBy('abogadoResp')" style="white-space:nowrap">Resp.</th>
           <th onclick="sortBy('dependencia')" style="min-width:160px">Dependencia</th>
           <th onclick="sortBy('secop')" style="white-space:nowrap">Consec. SECOP</th>
           <th onclick="sortBy('fechaAsignacion')" style="white-space:nowrap">F. Asignación</th>
@@ -680,6 +693,9 @@ tr.accordion-row td{padding:0 !important;border-bottom:1px solid var(--border);}
         </div>
         <div class="form-group"><label>Abogado Asignado *</label>
           <select id="f-abogado"><option value="">— Seleccionar —</option><option>JOHANNA AGUDELO</option><option>YULY LEIVA</option><option>OSCAR VICTORIA</option><option>NATALIA JIMENEZ</option><option>ALEXANDRA PORTILLO</option><option>JESSICA GUTIERREZ</option><option>BRIAM BRITO</option><option>JUAN DAVID GUTIERREZ</option><option>TANIA HUMANEZ</option><option>KATIANA JIMENEZ</option><option>JHOANA MEDINA</option><option>MARIANA GARCIA MORALES</option><option>CAROLYN RODRIGUEZ</option><option>WILLIAM LEIVA</option><option>RONALD GONGORA</option></select>
+        </div>
+        <div class="form-group"><label>Abogado Responsable</label>
+          <select id="f-abogado-resp"><option value="Sin Asignar">Sin Asignar</option><option>JOHANNA AGUDELO</option><option>YULY LEIVA</option><option>OSCAR VICTORIA</option><option>NATALIA JIMENEZ</option><option>ALEXANDRA PORTILLO</option><option>JESSICA GUTIERREZ</option><option>BRIAM BRITO</option><option>JUAN DAVID GUTIERREZ</option><option>TANIA HUMANEZ</option><option>KATIANA JIMENEZ</option><option>JHOANA MEDINA</option><option>MARIANA GARCIA MORALES</option><option>CAROLYN RODRIGUEZ</option><option>WILLIAM LEIVA</option><option>RONALD GONGORA</option></select>
         </div>
         <div class="form-group full"><label>Dependencia *</label>
           <select id="f-dependencia"><option value="">— Seleccionar dependencia —</option>
@@ -1144,6 +1160,7 @@ function renderTable(){
   const q=(document.getElementById('search-input')?.value||'').toLowerCase();
   const advEnc=(document.getElementById('adv-encargado')?.value||'').toLowerCase();
   const advAbog=(document.getElementById('adv-abogado')?.value||'').toLowerCase();
+  const advAbogResp=(document.getElementById('adv-abogado-resp')?.value||'').toLowerCase();
   const advDep=(document.getElementById('adv-dependencia')?.value||'').toLowerCase();
   const advDesde=document.getElementById('adv-fecha-desde')?.value||'';
   const advHasta=document.getElementById('adv-fecha-hasta')?.value||'';
@@ -1154,12 +1171,14 @@ function renderTable(){
       (r.ticket||'').toLowerCase().includes(q)||
       (r.encargado||'').toLowerCase().includes(q)||
       (r.abogado||'').toLowerCase().includes(q)||
+      (r.abogadoResp||'').toLowerCase().includes(q)||
       (r.objeto||'').toLowerCase().includes(q)||
       (r.obs||'').toLowerCase().includes(q)||
       (r.secop||'').toLowerCase().includes(q)
     )) return false;
     if(advEnc && (r.encargado||'').toLowerCase()!==advEnc) return false;
     if(advAbog && (r.abogado||'').toLowerCase()!==advAbog) return false;
+    if(advAbogResp && (r.abogadoResp||'Sin Asignar').toLowerCase()!==advAbogResp) return false;
     if(advDep && (r.dependencia||'').toLowerCase()!==advDep) return false;
     if(advDesde && r.fechaEntrega && r.fechaEntrega<advDesde) return false;
     if(advHasta && r.fechaEntrega && r.fechaEntrega>advHasta) return false;
@@ -1190,6 +1209,7 @@ function renderTable(){
         </td>
         <td style="white-space:nowrap;font-size:13px;">${escHtml(r.encargado||'—')}</td>
         <td style="white-space:nowrap;font-size:13px;">${escHtml(r.abogado||'—')}</td>
+        <td style="white-space:nowrap;font-size:12px;">${r.abogadoResp&&r.abogadoResp!=='Sin Asignar'?escHtml(r.abogadoResp):'<span style=\"color:var(--muted);font-style:italic;\">Sin asignar</span>'}</td>
         <td style="font-size:12px;max-width:180px;" title="${escHtml(r.dependencia||'')}">${escHtml(depS)}</td>
         <td style="font-family:var(--mono);font-size:12px;white-space:nowrap;">${escHtml(r.secop||'—')}</td>
         <td class="date-cell ${r.fechaAsignacion?'':'empty'}" style="white-space:nowrap;">${fmtDate(r.fechaAsignacion)||'Sin fecha'}</td>
@@ -1278,6 +1298,7 @@ function renderCards(data){
         <div class="pc-objeto">${escHtml(r.objeto||'Sin objeto definido')}</div>
         <div class="pc-row"><span class="pc-icon">👤</span><div><div class="pc-label">Encargado</div><div class="pc-val">${escHtml(r.encargado||'—')}</div></div></div>
         <div class="pc-row"><span class="pc-icon">⚖️</span><div><div class="pc-label">Abogado</div><div class="pc-val">${escHtml(r.abogado||'—')}</div></div></div>
+        <div class="pc-row"><span class="pc-icon">👤</span><div><div class="pc-label">Responsable</div><div class="pc-val">${r.abogadoResp&&r.abogadoResp!=='Sin Asignar'?escHtml(r.abogadoResp):'<em style="color:var(--muted)">Sin asignar</em>'}</div></div></div>
         ${r.secop?`<div class="pc-row"><span class="pc-icon">📄</span><div><div class="pc-label">SECOP</div><div class="pc-val">${escHtml(r.secop)}</div></div></div>`:''}
         <div class="pc-dates">
           <div class="pc-date-item"><span class="pc-date-label">Asignación</span><span class="pc-date-val">${fmtDate(r.fechaAsignacion)||'—'}</span></div>
@@ -1324,6 +1345,7 @@ function openModal(id=null){
   document.getElementById('f-ticket').value=r?.ticket||'';
   document.getElementById('f-encargado').value=r?.encargado||'';
   document.getElementById('f-abogado').value=r?.abogado||'';
+  document.getElementById('f-abogado-resp').value=r?.abogadoResp||'Sin Asignar';
   document.getElementById('f-dependencia').value=r?.dependencia||'';
   document.getElementById('f-secop').value=r?.secop||'';
   document.getElementById('f-objeto').value=r?.objeto||'';
@@ -1352,11 +1374,12 @@ async function saveRecord(){
   const ticket=sanitizeInput(document.getElementById('f-ticket').value.trim(),50);
   const encargado=document.getElementById('f-encargado').value;
   const abogado=document.getElementById('f-abogado').value;
+  const abogadoResp=document.getElementById('f-abogado-resp').value;
   if(!ticket||!encargado||!abogado){alert('Completa: Ticket, Encargado y Abogado.');return;}
   const existing=editingId?(window._records||[]).find(r=>r.id===editingId):null;
   const data={
     id:editingId||('r'+Date.now()+'_'+Math.random().toString(36).slice(2,7)),
-    ticket,encargado,abogado,
+    ticket,encargado,abogado,abogadoResp,
     dependencia:document.getElementById('f-dependencia').value,
     secop:sanitizeInput(document.getElementById('f-secop').value.trim(),80),
     objeto:sanitizeInput(document.getElementById('f-objeto').value.trim(),1000),
